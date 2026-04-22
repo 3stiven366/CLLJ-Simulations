@@ -38,7 +38,25 @@ params.forcing.forcing_rate = 1e-6
 #_________________________________________________
 
 """
-Este forzamiento se utiliza porque permite **inyectar energía únicamente en las ondas**, sin imponer directamente la estructura ni la intensidad del flujo zonal. Al ser **estocástico**, no introduce una fase ni una frecuencia preferencial, lo que evita forzar artificialmente una onda específica y permite analizar el intercambio de energía de manera **estadística**, como ocurre en la atmósfera real con procesos convectivos no resueltos. El hecho de que el forzamiento actúe solo en **números de onda bajos** garantiza que la energía se inyecte en **escalas largas tropicales**, que son las relevantes para la interacción con jets barotrópicamente inestables. Además, la **tasa de inyección débil** asegura que la dinámica esté dominada por la interacción no lineal entre ondas y flujo medio, y no por la fuente externa. Finalmente, al **excluir el modo zonal** ((k_x=0)), el flujo medio puede evolucionar libremente, de modo que cualquier ganancia o pérdida de energía del jet proviene exclusivamente de la transferencia con las ondas, permitiendo identificar de forma clara y físicamente consistente el intercambio de energía ondas–corriente media.
+Este forzamiento se utiliza porque permite **inyectar energía 
+únicamente en las ondas**, sin imponer directamente la estructura 
+ni la intensidad del flujo zonal.
+Al ser **estocástico**, no introduce una fase ni una frecuencia
+preferencial, lo que evita forzar artificialmente una onda específica
+y permite analizar el intercambio de energía de manera 
+**estadística**, como ocurre en la atmósfera real con procesos 
+convectivos no resueltos. El hecho de que el forzamiento actúe 
+solo en **números de onda bajos** garantiza que la energía 
+se inyecte en **escalas largas tropicales**, que son las relevantes
+para la interacción con jets barotrópicamente inestables. 
+Además, la **tasa de inyección débil** asegura que la dinámica
+esté dominada por la interacción no lineal entre ondas y flujo medio 
+y no por la fuente externa. Finalmente, al **excluir el modo zonal** 
+((k_x=0)), el flujo medio puede evolucionar libremente, de modo que 
+cualquier ganancia o pérdida de energía del jet proviene 
+exclusivamente de la transferencia con las ondas, permitiendo 
+identificar de forma clara y físicamente consistente el 
+_lintercambio de energía ondas–corriente media.
 
 """
 
