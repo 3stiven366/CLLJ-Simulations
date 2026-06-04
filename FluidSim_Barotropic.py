@@ -76,8 +76,8 @@ days: int = 180                          # Days of simulation
 period: int = 86400 * days              # [s]
 
 
-Lx_deg: int = 360                       # [°] Global zonal domain
-Ly_deg: int = 60                        # [°] southern domain
+Lx_deg: int = 120                       # [°] Global zonal domain (Región Caribe + Pácifico)
+Ly_deg: int = 30                        # [°] southern domain (15°S a 15°N )
 Nx: int    = 720                        # Zonal points   
 Ny: int    = 240                        # Southern points 
 
@@ -90,21 +90,25 @@ NU_4: float = 1e11                      # [m⁴/s] hyperviscosity
 
 JET_PARAMS: list[tuple] = [
                                         # (lat_center [m], amplitude [m/s], sigma [m])
-    ( 10*m, -8.0, 7*m),                 # Main jet NH — 10°N  (informe Tabla 3)
-    (-10*m, -6.0, 8*m),                 # Secondary jet SH — 10°S
-    (  0.0, -3.0, 15*m),                # low amplitude equatorial component
+    ( 0.0, -4.0, 7*m),                 # Main jet NH — 10°N  (informe Tabla 3)
+    (-10*m, -2.0, 6*m),                 # Secondary jet SH — 10°S
+    ( 10.0*m, -1.0, 10*m),                # low amplitude equatorial component
 ]
 
+#Latitud 15° <- centro (10°-20°)
+#Long 75° <- centro (60°-80°)
+# Max V = 15 m/s (Jet core)
 
 
-WAVE1 = dict(k=6, T_days=5.0, amp=3.0, lat0=10*m, sigma_y=8*m)
-WAVE2 = dict(k=4, T_days=3.5, amp=1.5, lat0=-8*m, sigma_y=6*m)
+WAVE1 = dict(k=4, T_days=4.0, amp=1.0, lat0=0.0, sigma_y=5*m)
+WAVE2 = dict(k=6, T_days=3.0, amp=0.7, lat0=-5*m, sigma_y=4*m)
+
  
-NOISE_SIGMA = 0.5                       # [m/s] Synthetic noise
+NOISE_SIGMA = 0.1                       # [m/s] Synthetic noise
  
 # Spectral forcing
 NK_MAX_FORCING = 7
-NK_MIN_FORCING = 2
+NK_MIN_FORCING = 3
 
 # ============================================================================
 # SECTION 2 — FLUIDSIM PARAMETER CONFIGURATION
@@ -127,8 +131,8 @@ params.nu_4 = NU_4
 
 # Temporary integration
 params.time_stepping.t_end = period
-params.time_stepping.deltat_max = float(90)     # [s]
-params.time_stepping.deltat0 = float(45)        # [s]
+params.time_stepping.deltat_max = float(45)     # [s]
+params.time_stepping.deltat0 = float(20)        # [s]
 
 # Velocity field initialization 
 params.init_fields.type = "in_script"
@@ -142,12 +146,12 @@ params.forcing.key_forced = "rot_fft"
 
 # Output
 params.output.sub_directory                  = "barotropic_cllj_cluster"
-params.output.periods_print.print_stdout     = 3600.0   # [s]
-params.output.periods_save.phys_fields       = 86400.0  # [s] 
-params.output.periods_save.spectra           = 43200.0  # [s] 
-params.output.periods_save.spatial_means     = 3600.0   # [s] 
-params.output.periods_save.spect_energy_budg = 86400.0  # [s] 
-params.output.periods_save.increments        = 86400.0  # [s] 
+params.output.periods_print.print_stdout     = 3600.0       # [s]
+params.output.periods_save.phys_fields       = 3600.0       # [s] 
+params.output.periods_save.spectra           = 3600.0       # [s] 
+params.output.periods_save.spatial_means     = 3600.0       # [s] 
+params.output.periods_save.spect_energy_budg = 3600.0       # [s] 
+params.output.periods_save.increments        = 3600.0       # [s] 
 
 
 #------------------------------------------------------------------
