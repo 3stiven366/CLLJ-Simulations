@@ -2,7 +2,7 @@
 
 Python-based simulation of barotropic instability in geophysical flows, developed as part of undergraduate research at [CIGEFI](https://www.cigefi.ucr.ac.cr/) (Center for Geophysical Research, University of Costa Rica), under the supervision of Dr. Tito Maldonado.
 
-## Overview (Descripción)
+## Overview 
 
 This project simulates the Intra-Americas Seas (IAS) region to investigate the interaction between the Caribbean Low-Level Jet (CLLJ) and tropical easterly waves (EWs) within the theoretical framework of barotropic instability, using [FluidSim](https://fluidsim.readthedocs.io/), running on the University of Costa Rica's institutional HPC cluster.
 
@@ -59,13 +59,7 @@ The objective of this project is to investigate these nonlinear jet–wave inter
 The simulations solve the two-dimensional barotropic vorticity equation on a $\beta$-plane,
 
 $$
-\frac{\partial \zeta}{\partial t}
-+
-J(\psi,\zeta+f)
-=
-\nu_4\nabla^4\zeta
-+
-F,
+\frac{\partial \zeta}{\partial t} + J(\psi,\zeta+f) = \nu_4\nabla^4\zeta + F
 $$
 
 where $\zeta=\nabla^2\psi$ is the relative vorticity, $f=f_0+\beta y$ is the Coriolis parameter, $\nu_4$ is the hyperviscosity coefficient, and $F$ represents the prescribed vorticity forcing that continuously injects easterly-wave energy into the domain.
@@ -79,10 +73,7 @@ $$
 whose sign reversal indicates a necessary condition for barotropic instability. The second is the **barotropic kinetic energy conversion**,
 
 $$
-CK
-=
--\left\langle u'v' \right\rangle
-\frac{\partial U}{\partial y},
+CK=-\left\langle u'v' \right\rangle\frac{\partial U}{\partial y},
 $$
 
 which measures the transfer of kinetic energy between the mean jet and the perturbations. Positive values of $CK$ indicate that the perturbations extract energy from the mean flow, allowing tropical easterly waves to grow or be maintained.
@@ -117,17 +108,13 @@ These perturbations typically have amplitudes of approximately $\pm 5\,\mathrm{m
 The perturbation amplitude directly influences the **barotropic kinetic energy conversion** through the eddy momentum flux,
 
 $$
-\left\langle u'v' \right\rangle,
+\left\langle u'v' \right\rangle
 $$
 
 which appears in the energy conversion term,
 
 $$
-CK
-=
--
-\left\langle u'v' \right\rangle
-\frac{\partial U}{\partial y}.
+CK=-\left\langle u'v' \right \rangle \frac{\partial U}{\partial y}
 $$
 
 Larger perturbation amplitudes generally produce stronger momentum fluxes, increasing the rate at which tropical easterly waves can extract kinetic energy from the mean Caribbean Low-Level Jet.
@@ -171,7 +158,7 @@ CLLJ-Simulations/
 │
 ├── era5/                     # ERA5 download and preprocessing
 │   ├── data.py
-│
+│   ├── era5_cllj_925.nc 
 ├── analysis/                 # Diagnostics and post-processing
 │   ├── post-processing-data.py
 │
@@ -179,16 +166,7 @@ CLLJ-Simulations/
 │   ├── run_64cores.sh
 │   ├── run_debug.sh
 │   └── README.md
-│
-├── data/                     # Input datasets 
-│   ├── ERA5/
-│   └── processed/
-│
-├── outputs/                  # Example outputs
-│   ├── figures/
-│   └── diagnostics/
-│
-└── docs/                     # Additional documentation
+├── output/                   # Results 
 ```
 ## Tech Stack
 
