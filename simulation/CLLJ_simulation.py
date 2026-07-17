@@ -1,56 +1,97 @@
 """
-FluidSim_Barotropic.py
+CLLJ_simulation.py
 ==============================
 Two-dimensional barotropic vorticity simulation of Easterly Wave–Caribbean
 Low-Level Jet (EW–CLLJ) interactions over the Intra-Americas Seas (IAS).
- 
+
 Physical motivation
 -------------------
 Rivera (2026) documents that the CLLJ provides a barotropically unstable
 mean-flow environment for tropical easterly waves during boreal summer. The
 Rayleigh–Kuo criterion (∂q̄/∂y changes sign) is satisfied over most of the
 OTREC 2019 period, and positive eddy momentum covariance ⟨u′v′⟩ at
-Guanacaste and San Andrés indicates mean-to-eddy energy transfer (CBT > 0).
- 
+Guanacaste and San Andrés indicates mean-to-eddy energy transfer (CK > 0).
+
 This model captures those mechanisms using the 2D barotropic vorticity
 equation on a β-plane:
- 
+
     ∂ζ/∂t + J(ψ, ζ + f) = ν₄∇⁴ζ + F
- 
+
 where ζ = ∇²ψ is the relative vorticity, f = f₀ + βy is the Coriolis
-parameter, ν₄ is the hyperviscosity, and F is the vorticity forcing that
-continuously injects easterly-wave energy into the domain.
- 
-Governing parameters (calibrated to article)
---------------------------------------------
-Domain       : 360° × 60° (global zonal, 30°S–30°N)
-Resolution   : nx=720, ny=240  →  Δx≈0.5°, Δy≈0.25° (ERA5-equivalent)
+parameter, ν₄ is the hyperviscosity, and F is the prescribed vorticity
+forcing that continuously replenishes the easterly-wave structure.
+
+Diagnostics of interest
+-----------------------
+Rayleigh–Kuo criterion  : β − ∂²ū/∂y²  (sign change ⇒ necessary condition)
+Barotropic conversion   : CK = −⟨u′v′⟩ ∂ū/∂y  (CK > 0 ⇒ jet → eddies)
+Eddy kinetic energy     : EKE = ½⟨u′² + v′²⟩
+
+Governing parameters
+--------------------
+Domain       : 120° × 20°  (100°W–60°W, 5°N–25°N; y = 0 ↔ 15°N)
+Resolution   : nx=1024, ny=512  →  Δx ≈ 0.117°, Δy ≈ 0.039°
 β            : 2.29×10⁻¹¹ s⁻¹m⁻¹  (tropical β-plane at ~15°N)
-ν₄           : 1×10¹¹ m⁴/s         (scaled from coarser test run)
-Δt_max       : 90 s                 (CFL-stable; U_max≈8 m/s, Δx≈55 km)
-Integration  : 180 days             (JAS+SON boreal season)
-Forcing band : k = 2–7             (covers both EW modes)
- 
+ν₄           : 2×10¹³ m⁴/s        (rescaled with resolution as Δx⁴)
+Δt_max       : 50 s               (CFL-stable; U_max ≈ 12 m/s)
+Integration  : 90 days            (JAS boreal summer season)
+Jet profile  : 2-Gaussian fit to ERA5 JAS climatology (925 hPa,
+               90°W–80°W, 1991–2020); narrow CLLJ core near 11.7°N
+               plus a broad component near 18.7°N
+Waves        : 4 modes, k = 4–7, T = 3–5 days (observed EW band)
+
+Forcing formulation
+-------------------
+The forcing term F is a *rate of vorticity injection* [s⁻²], not a vorticity
+field [s⁻¹] — every term in the vorticity equation above carries units of
+[s⁻²]. `easterly_wave` returns ζ′ = ∇²ψ′ in [s⁻¹], so each wave mode is
+normalised by its own period T_i to obtain the required rate:
+
+    F = Σ_i ζ′_i / T_i          [s⁻¹] / [s] = [s⁻²]
+
+Sustained over a time T_i, the forcing accumulates a vorticity of magnitude
+ζ′_i, i.e. it rebuilds one full wave structure in one wave period. This
+leaves no free tuning parameter: T_i is fixed by the prescribed wave period.
+
+Passing ζ′ directly as F is dimensionally inconsistent and injects vorticity
+orders of magnitude above the mean-flow shear within the first simulated
+hour, collapsing the adaptive time step (Δt → 10⁻² s).
+
+The model uses params.forcing.type = "in_script", NOT "in_script_coarse".
+With `in_script`, the array returned by compute_forcing_each_time is
+transformed by the (normalised) oper.fft and added directly to the nonlinear
+tendencies, so the injected amplitude is fully under user control. With
+`in_script_coarse`, FluidSim builds a reduced grid whose size it sets
+internally and renormalises the forcing, which for a spatially structured
+forcing such as a prescribed wave introduces large coarse-to-fine
+amplification factors.
+
 MPI notes
 ---------
 This script runs identically with and without MPI:
- 
-    python FluidSim_Barotropic_Cluster.py          # serial
-    mpirun -np 16 python FluidSim_Barotropic_Cluster.py  # parallel
- 
-FluidSim decomposes the domain into horizontal slabs of ny/nproc rows per
-rank. ny=240 must be exactly divisible by nproc. Valid choices:
-    2, 3, 4, 5, 6, 8, 10, 12, 15, 16, 20, 24  (NOT 32: 240/32=7.5)
- 
+
+    python CLLJ_simulation.py                    # serial
+    mpirun -np 64 python CLLJ_simulation.py      # parallel
+
+FluidSim decomposes the domain across ranks with the fft2d.mpi_with_fftw1d
+backend. Not every (resolution, nproc) pair is valid, and the constraint is
+not simply "ny divisible by nproc". The configuration below (ny=512, 64
+processes) is verified to run; if the resolution or the process count is
+changed, confirm the new pair on a short test run before committing to a
+long production job.
+
 Variable scope under MPI
 ------------------------
 Global (identical across all ranks):
     params, period, m, all physical constants, all functions.
 Local (each rank holds its own subdomain slice):
-    x_loc, y_loc, u_mean, U, V, rot, omega_fft.
-Rank-0 only (NameError on other ranks if accessed):
-    oper_coarse, x_c, y_c — used in the forcing function.
- 
+    x, y, u_mean, U, V, rot, omega_fft.
+
+Every rank evaluates the forcing on its own local subdomain — x and y already
+hold each rank's local coordinates — and FluidSim assembles the global field
+internally. No rank-0 guard is used (that pattern belongs to the abandoned
+`in_script_coarse` mode, where only rank 0 holds oper_coarse).
+
 Reference
 ---------
 Rivera, E.R. (2026). On the Interaction of Tropical Easterly Waves and the
@@ -190,60 +231,98 @@ def Jet_Field(lats: np.ndarray) -> np.ndarray:
 def easterly_wave(
         lats: np.ndarray,
         lons: np.ndarray,
-          t: float, 
-          wave_params: dict,
-          ) ->tuple[np.ndarray, np.ndarray]: 
+        t: float,
+        wave_params: dict,
+        ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    Compute the velocity perturbation of a westward-propagating easterly wave.
- 
-    The wave is represented as a Gaussian envelope in latitude modulated by
-    a sinusoidal carrier in longitude that propagates westward:
+    Compute the velocity perturbation of a westward-propagating easterly wave,
+    derived analytically from a streamfunction.
 
+    The perturbation streamfunction has a Gaussian envelope in latitude
+    modulated by a sinusoidal carrier in longitude that propagates westward:
 
-    u' = A sin(k*lambda + 20t/T)* exp{- frac{(varphi - varphi_0)^2}{2*sigma_y^2}}
-    v' = 0.6*A cos(k*lambda + 20t/T)* exp{- frac{(varphi - varphi_0)^2}{2*sigma_y^2}}
-    
+        psi'(x, y, t) = A(y) * sin(theta),   theta = kx*x + omega*t + phase0
+
+        A(y) = amp * sigma_y * sqrt(e) * exp{-(y - y0)^2 / (2*sigma_y^2)}
+
+    Normalization rationale
+    ------------------------
+    psi' has units of m^2/s, so the prefactor of the Gaussian envelope must
+    carry units of m^2/s as well; multiplying the velocity-scale amplitude
+    `amp` [m/s] by the length scale `sigma_y` [m] fixes this. The additional
+    factor sqrt(e) is chosen so that `amp` equals EXACTLY the peak zonal
+    perturbation amplitude max|u'|, reached at y = y0 +/- sigma_y (this is
+    a modeling choice made to preserve the amp = max|u'| convention used in
+    earlier iterations of this code; it is not drawn from any specific AEW
+    reference and should be revisited if a literature-calibrated forcing
+    scheme is adopted later).
+
+    Velocity components and vorticity follow by direct differentiation of
+    psi', which guarantees non-divergence and dynamical consistency between
+    u', v', and zeta' (no ad-hoc amplitude ratio like the previous 0.6
+    factor):
+
+        u'    =  d(psi')/dy      = A'(y) * sin(theta)
+        v'    = -d(psi')/dx      = -kx * A(y) * cos(theta)
+        zeta' =  laplacian(psi') = [A''(y) - kx^2 * A(y)] * sin(theta)
+
+    With this normalization:
+        max|u'| = amp                          (exact, at y = y0 +/- sigma_y)
+        max|v'| = kx * sigma_y * sqrt(e) * amp  (exact, at y = y0)
+
+    All derivatives are analytical (no finite differences), avoiding the
+    spectral noise introduced by np.gradient.
+
     Parameters
     ----------
-    lats : np.ndarray, shape (ny_local,)   Latitudes [m]
-    lons : np.ndarray, shape (nx,)         Longitudes [m]
-    t    : float                           Current simulation time [s].
+    lats : np.ndarray, shape (ny_local,)
+        Latitude coordinate array [m].
+    lons : np.ndarray, shape (nx,)
+        Longitude coordinate array [m].
+    t : float
+        Current simulation time [s].
     wave_params : dict
-        Keys: k (int), T_days (float), amp (float), lat0 (float), sigma_y (float).
- 
+        Keys: k (int, zonal wavenumber / number of wave cycles around the
+        domain), T_days (float, wave period in days), amp (float, exact peak
+        zonal velocity perturbation [m/s]), lat0 (float, latitude of the
+        envelope center [m]), sigma_y (float, meridional envelope width [m]),
+        phase0 (float, phase offset [rad]).
+
     Returns
     -------
-    u_prime, v_prime : np.ndarray, shape (ny_local, nx)     Velocity perturbations [m/s].
-
+    u_prime : np.ndarray, shape (ny_local, nx)
+        Zonal velocity perturbation [m/s].
+    v_prime : np.ndarray, shape (ny_local, nx)
+        Meridional velocity perturbation [m/s].
+    rot : np.ndarray, shape (ny_local, nx)
+        Relative vorticity of the perturbation, zeta' = laplacian(psi') [s⁻¹].
     """
-    
-    
     k       = wave_params['k']
     T       = wave_params['T_days'] * 86400.0   # [s]
-    amp     = wave_params['amp']
+    amp     = wave_params['amp']                # [m/s], exact max|u'|
     lat0    = wave_params['lat0']
     sigma_y = wave_params['sigma_y']
     phase   = wave_params['phase0']
 
     X, Y = np.meshgrid(lons, lats)
-    kx = 2*np.pi * k / params.oper.Lx
-    omega = 2*np.pi / T
-    phi = kx * X + omega * t + phase
+    kx = 2 * np.pi * k / params.oper.Lx      # physical zonal wavenumber [rad/m]
+    omega = 2 * np.pi / T
+    theta = kx * X + omega * t + phase
 
-    G = np.exp(-((Y - lat0)**2) / (2*sigma_y**2))
-    dG_dy = -(Y - lat0) / sigma_y**2 * G
+    dY = Y - lat0
+    envelope = np.exp(-(dY**2) / (2 * sigma_y**2))
+    C   = amp * sigma_y * np.sqrt(np.e)
+    A   = C * envelope                                           # [m^2/s]
+    dA  = -(dY / sigma_y**2) * A                                  # A'(y)  [m/s]
+    d2A = (dY**2 / sigma_y**4 - 1.0 / sigma_y**2) * A             # A''(y) [1/s]
 
-    u_prime = amp * np.sin(phi) * G
-    v_prime = amp * 0.6 * np.cos(phi) * G
-    
-    dvdx    = -0.6 * amp * kx * np.sin(phi) * G
-    dudy    =        amp       * np.cos(phi) * dG_dy
-    rot     = dvdx - dudy
+    u_prime = dA * np.sin(theta)
+    v_prime = -kx * A * np.cos(theta)
+    rot     = (d2A - kx**2 * A) * np.sin(theta)
+
     return u_prime, v_prime, rot
 
 
-#______________
-#_______________
 def add_noise(
     field: np.ndarray,
     sigma: float = NOISE_SIGMA,
@@ -319,17 +398,71 @@ sim.state.init_from_rotfft(omega)
 if params.forcing.enable:
     forcing_maker = sim.forcing.forcing_maker
 
-    def compute_forcing_each_time(self):
+    def compute_forcing_each_time(self) -> np.ndarray:
+        """
+        Evaluate the vorticity forcing F at the current time step.
+    
+        This method is monkey-patched into FluidSim's `in_script` forcing maker and
+        is called at every time step. The array it returns is transformed to Fourier
+        space by FluidSim (`oper.fft`, which is normalised) and added directly to the
+        nonlinear tendencies in `tendencies_nonlin`:
+    
+            tendencies_fft += self.forcing.get_forcing()
+    
+        Units
+        -----
+        `tendencies_fft` represents dzeta/dt, so the returned array MUST have units
+        of [s^-2] — it is a *rate of vorticity injection*, not a vorticity field.
+        The barotropic vorticity equation
+    
+            dzeta/dt + J(psi, zeta + f) = nu_4 * lap^2(zeta) + F
+    
+        is dimensionally consistent only if every term is [s^-2]; this is a property
+        of the equation itself, not a FluidSim convention.
+    
+        `easterly_wave` returns zeta' = lap(psi'), which is a vorticity in [s^-1].
+        Dividing by a characteristic time T converts it to the required rate:
+    
+            F = zeta' / T          [s^-1] / [s] = [s^-2]
+    
+        Passing zeta' directly (without dividing by T) is dimensionally wrong and
+        numerically injects vorticity ~10^2 times larger than the mean jet's within
+        a single simulated hour, collapsing the adaptive time step.
+    
+        Choice of T
+        -----------
+        Each wave mode is normalised by ITS OWN period T_i rather than by a single
+        global constant. The interpretation is that the forcing rebuilds one full
+        wave structure over one wave period: sustained for a time T_i, the injected
+        vorticity accumulates to zeta'_i. This leaves no free tuning parameter —
+        T_i is already fixed by the prescribed wave period, taken from the observed
+        2.5-6 day easterly-wave band.
+    
+            F = sum_i ( zeta'_i / T_i )
+    
+        MPI behaviour
+        -------------
+        Every rank evaluates the forcing on its own local subdomain: `x` and `y`
+        already hold each rank's local coordinates, so no rank-0 guard is needed.
+        FluidSim assembles the global field internally. (This differs from the
+        `in_script_coarse` mode, where only rank 0 computes the coarse field.)
+    
+        Returns
+        -------
+        F : np.ndarray, shape (ny_local, nx)
+            Vorticity injection rate [s^-2] in physical space on the local subdomain.
+        """
         t_now = sim.time_stepping.t
-        _, _, rot1 = easterly_wave(y, x, t_now, WAVE1)
-        _, _, rot2 = easterly_wave(y, x, t_now, WAVE2)
-        _, _, rot3 = easterly_wave(y, x, t_now, WAVE3)
-        _, _, rot4 = easterly_wave(y, x, t_now, WAVE4)
-        rot = rot1 + rot2 + rot3 +rot4
+    
+        F = np.zeros((len(y), len(x)))
+    
+        for wave_params in (WAVE1, WAVE2, WAVE3, WAVE4):
+            _, _, rot = easterly_wave(y, x, t_now, wave_params)
+            T_wave = wave_params['T_days'] * 86400.0        # [s]
+            F += rot / T_wave                               # [s^-1] / [s] = [s^-2]
+    
+        return F
 
-        T_forcing = 4 * 86400.0
-        rot_norm = rot / T_forcing
-        return rot_norm  # [s⁻¹] en espacio físico
 
     forcing_maker.monkeypatch_compute_forcing_each_time(compute_forcing_each_time)
 

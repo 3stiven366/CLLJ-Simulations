@@ -85,22 +85,43 @@ which measures the transfer of kinetic energy between the mean jet and the pertu
 - Pseudo-spectral formulation
 
 
-### External Forcing - Easterly Waves
 
-The wave is taken as the perturbation and it is represented as a Gaussian envelope in latitude modulated by a sinusoidal carrier in longitude that propagates westward:
 
-$$u' = A \sin(k \lambda + 2\pi t/T) e^{- \frac{(\varphi - \varphi_0)^2}{2 \sigma_y^2}}$$
+### Easterly Wave Perturbations
 
-$$v' = 0.6 A \cos(k \lambda + 2\pi t/T) e^{- \frac{(\varphi - \varphi_0)^2}{2 \sigma_y^2}}$$
+The wave is taken as the perturbation and is derived from a streamfunction with a Gaussian envelope in latitude modulated by a sinusoidal carrier in longitude that propagates westward:
 
+$$\psi' = A(y) \sin(k_x x + \omega t + \phi_0), \qquad A(y) = A_0\, \sigma_y \sqrt{e}\; e^{-\frac{(y - y_0)^2}{2\sigma_y^2}}$$
+
+The velocity components and the perturbation vorticity follow by direct differentiation of $\psi'$, which guarantees a non-divergent flow and dynamical consistency between $u'$, $v'$ and $\zeta'$:
+
+$$u' = \frac{\partial \psi'}{\partial y} = A'(y) \sin(k_x x + \omega t + \phi_0)$$
+
+$$v' = -\frac{\partial \psi'}{\partial x} = -k_x A(y) \cos(k_x x + \omega t + \phi_0)$$
+
+$$\zeta' = \nabla^2 \psi' = \left[A''(y) - k_x^2 A(y)\right] \sin(k_x x + \omega t + \phi_0)$$
+
+with the analytical derivatives of the Gaussian envelope:
+
+$$A'(y) = -\frac{(y - y_0)}{\sigma_y^2} A(y), \qquad A''(y) = \left[\frac{(y-y_0)^2}{\sigma_y^4} - \frac{1}{\sigma_y^2}\right] A(y)$$
 
 The parameters are defined as follows:
 
-- $k$ — wave number ($\mathrm{m^{-1}}$).
-- $\lambda$ — wavelength ($\mathrm{m}$).
+- $k$ — zonal wavenumber (dimensionless): the number of complete wave cycles fitting in the zonal domain.
+- $k_x = 2\pi k / L_x$ — physical zonal wavenumber ($\mathrm{rad\,m^{-1}}$).
+- $x$ — zonal coordinate ($\mathrm{m}$).
+- $y$ — meridional coordinate ($\mathrm{m}$), with $y_0$ the latitude of the envelope centre.
+- $\sigma_y$ — meridional envelope width ($\mathrm{m}$).
 - $t$ — time ($\mathrm{s}$).
-- $T$ — wave period ($\mathrm{s}$).
-- $A$ — velocity perturbation amplitude, which defines the initial strength of the prescribed tropical waves through the wind anomalies $u'$ and $v'$.
+- $T$ — wave period ($\mathrm{s}$), with $\omega = 2\pi/T$.
+- $\phi_0$ — phase offset ($\mathrm{rad}$).
+- $A_0$ — velocity perturbation amplitude ($\mathrm{m\,s^{-1}}$), which defines the initial strength of the prescribed tropical waves through the wind anomalies $u'$ and $v'$.
+
+Since $\psi'$ has units of $\mathrm{m^2\,s^{-1}}$, the envelope prefactor must carry those units as well: multiplying the velocity scale $A_0$ by the length scale $\sigma_y$ fixes this. The additional factor $\sqrt{e}$ is a normalization choice made so that $A_0$ equals exactly the peak zonal perturbation amplitude:
+
+$$\max|u'| = A_0 \quad \text{at } y = y_0 \pm \sigma_y, \qquad \max|v'| = k_x \sigma_y \sqrt{e}\, A_0 \quad \text{at } y = y_0$$
+
+Note that $u'$ is the derivative of a Gaussian and therefore has a dipolar structure in latitude — it vanishes at $y_0$ and peaks at $y_0 \pm \sigma_y$ — while $v'$ peaks at the envelope centre. The ratio between the two amplitudes is set by $k_x \sigma_y \sqrt{e}$, i.e. by the spatial scale of the wave, rather than by a prescribed constant.
 
 These perturbations typically have amplitudes of approximately $\pm 5\,\mathrm{m\,s^{-1}}$.
 
@@ -116,8 +137,108 @@ $$
 CK=-\left\langle u'v' \right \rangle \frac{\partial U}{\partial y}
 $$
 
-Larger perturbation amplitudes generally produce stronger momentum fluxes, increasing the rate at which tropical easterly waves can extract kinetic energy from the mean Caribbean Low-Level Jet.
-   
+Larger perturbation amplitudes generally produce stronger momentum fluxes, increasing the rate at which tropical easterly waves can extract kinetic energy from the mean Caribbean Low-Level Jet. The quadrature phase relationship between $u'$ and $v'$ that sustains $\langle u'v'\rangle \neq 0$ now emerges from the streamfunction formulation itself rather than being imposed externally.
+
+### Vorticity Forcing Implementation
+
+The perturbations described above define a wave structure, but they do not by
+themselves define how that structure is *injected* into the flow. This section
+makes that distinction explicit, since it is the source of a subtle but critical
+dimensional issue.
+
+#### The forcing term is a rate, not a field
+
+The governing equation solved by the model is
+
+$$
+\frac{\partial \zeta}{\partial t} + J(\psi,\zeta+f) = \nu_4\nabla^4\zeta + F
+$$
+
+Every term in this equation carries units of $\mathrm{s^{-2}}$. In particular
+$\partial\zeta/\partial t$ has units of $[\zeta]/[t] = \mathrm{s^{-1}}/\mathrm{s}
+= \mathrm{s^{-2}}$, and therefore $F$ must also be $\mathrm{s^{-2}}$ — otherwise
+it could not be added to the other terms.
+
+This is a property of the vorticity equation itself, not of any particular
+solver. $F$ is a **source term in an evolution equation**: it is the *rate* at
+which vorticity is injected, not a vorticity field.
+
+The wave vorticity computed analytically from the streamfunction,
+
+$$
+\zeta' = \nabla^2\psi' = \left[A''(y) - k_x^2 A(y)\right]\sin(k_x x + \omega t + \phi_0),
+$$
+
+has units of $\mathrm{s^{-1}}$, as expected for a vorticity. Passing $\zeta'$
+directly as $F$ would be dimensionally inconsistent, and numerically it injects
+vorticity orders of magnitude larger than the mean flow within a few time steps,
+causing the adaptive time step to collapse.
+
+#### Normalisation by the wave period
+
+The forcing is therefore defined as the wave vorticity divided by a
+characteristic time scale:
+
+$$
+F = \frac{\zeta'}{T}, \qquad [F] = \frac{\mathrm{s^{-1}}}{\mathrm{s}} = \mathrm{s^{-2}}
+$$
+
+The interpretation is direct: sustained over a time $T$, the forcing accumulates
+a vorticity of magnitude $\zeta'$, i.e. it rebuilds one full wave structure in
+one characteristic time. For multiple superposed waves, each mode is normalised
+by its own period $T_i$ rather than by a single global constant, so that each
+wave is replenished on its own dynamical time scale:
+
+$$
+F = \sum_i \frac{\zeta'_i}{T_i}
+$$
+
+This removes any free tuning parameter from the forcing: $T_i$ is already
+prescribed by the wave period $T_{\mathrm{days},i}$, which is set from the
+observed 2.5–6 day easterly-wave band.
+
+Physically, the forcing continuously replenishes the prescribed wave structure
+while the mean jet deforms it and exchanges energy with it through the
+barotropic conversion term $CK$. The waves are therefore maintained rather than
+allowed to decay, and the diagnosed $CK$ reflects the jet–wave interaction under
+a statistically steady wave supply.
+
+#### FluidSim implementation notes
+
+FluidSim offers two relevant in-script forcing modes, and the distinction matters:
+
+| Mode | Grid | Normalisation |
+|------|------|---------------|
+| `in_script_coarse` | Reduced grid, upscaled internally | Renormalised internally by FluidSim |
+| `in_script` | Full simulation grid | None — the returned array is used as-is |
+
+With `in_script_coarse`, FluidSim builds a coarse spectral grid (whose size it
+determines internally from `nkmax_forcing`) and rescales the forcing to maintain
+a prescribed injection rate. The returned amplitude is therefore not under the
+user's control, and for a spatially structured forcing such as a prescribed wave
+the coarse-to-fine projection introduces large amplification factors.
+
+With `in_script`, the array returned by `compute_forcing_each_time` is
+transformed by `oper.fft()` (which is normalised, so a physical-space value of
+magnitude $a$ maps to a spectral coefficient of the same magnitude) and added
+directly to the nonlinear tendencies in `tendencies_nonlin`:
+
+```python
+if self.params.forcing.enable:
+    tendencies_fft += self.forcing.get_forcing()
+```
+
+`tendencies_fft` is $\partial\zeta/\partial t$. This is the concrete reason the
+returned array must be $\mathrm{s^{-2}}$: it is summed with the Jacobian and
+dissipation terms and then multiplied by $\Delta t$ inside the RK4 integrator.
+
+For this reason the model uses `in_script`, which gives full control over the
+injected amplitude and avoids the hidden renormalisation.
+
+Under MPI, every rank evaluates the forcing on its own local subdomain — the
+arrays `x` and `y` already hold each rank's local coordinates — and FluidSim
+assembles the global field internally. No rank-0 guard is used.
+  
 
 ### Mean Jet Profile
 
