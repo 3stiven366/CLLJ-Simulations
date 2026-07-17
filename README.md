@@ -27,8 +27,7 @@ Barotropic instability is a fundamental mechanism in geophysical fluid dynamics 
 
 ## Data Sources
 
-- ERA5 (Datos de reanalisis descargados para el nivel # hPa de las componentes u del jet)
-
+- ERA5 reanalysis data of the 925 hPa zonal wind component (u), used to construct and calibrate the climatological Caribbean Low-Level Jet (CLLJ) profile.
 ## Scientific Background
 
 ### Physical Motivation
@@ -125,14 +124,7 @@ Larger perturbation amplitudes generally produce stronger momentum fluxes, incre
 The Caribbean Low-Level Jet (CLLJ) is modeled as a superposition of Gaussian functions, producing a zonally uniform and climatologically realistic mean flow:
 
 $$
-\overline{u}(\varphi)
-=
-\sum_i
-A_i
-\exp\left(
--\frac{(\varphi-\varphi_i)^2}
-{2\sigma_i^2}
-\right).
+\overline{u}(\varphi)=\sum_i A_i \exp\left(-\frac{(\varphi-\varphi_i)^2} {2\sigma_i^2}\right)
 $$
 
 The sign convention is such that $\overline{u}<0$ represents easterly winds. Since the mean flow is assumed to be zonally uniform, it depends only on latitude and is independent of longitude.
