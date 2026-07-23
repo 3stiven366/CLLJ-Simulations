@@ -119,7 +119,7 @@ period: int = 86400 * days              # [s]
 ACTIVE_FORCING = True                   # True / False
 
 
-Lx_deg: int = 120                       # [°]  zonal domain (100°W - 60°W)
+Lx_deg: int = 40                       # [°]  zonal domain (100°W - 60°W)
 Ly_deg: int = 20                        # [°] southern domain (25°N - 5°N )
 Nx: int    = 1024                        # Zonal points   
 Ny: int    = 512                        # Southern points 
@@ -135,7 +135,7 @@ JET_PARAMS: list[tuple] = [
                                        # (lat_center [m], amplitude [m/s], sigma [m])
     ( -3.297*m, -5.166, 1.058*m),                 # Núcleo CLLJ → 15°N real (y=0) 
     (3.719*m, -6.816, 3.946*m),                 # Flanco sur  → 10°N real
-   # ( 5*m, -8.0, 7*m),                 # Flanco norte → 20°N rea
+     ( 5*m, -8.0, 7*m),                 # Flanco norte → 20°N rea
     ]
 #Latitud 15° <- centro (10°-20°)
 #Long 75° <- centro (60°-80°)

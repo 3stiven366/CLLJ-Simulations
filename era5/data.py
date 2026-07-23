@@ -1,14 +1,17 @@
 """
-Ajuste de N gaussianas al perfil zonal medio del CLLJ (925 hPa)
-usando climatologia ERA5 JAS sobre el nucleo caribeño (90W-80W).
+Fit N Gaussian components to the zonal-mean profile of the Caribbean
+Low-Level Jet (CLLJ, 925 hPa) using the ERA5 JAS climatology
+(1991–2020).
 
-Ajusta modelos de 1, 2 y 3 gaussianas y selecciona el mejor por AICc.
-Salida: parametros (A_i, phi_i, sigma_i) listos para Jet_Field()
-en FluidSim, en coordenada centrada y = lat - 15N.
+The meridional profile is obtained by averaging the zonal wind over
+100°W–60°W and is subsequently fitted with models containing 1, 2,
+and 3 Gaussian components. The best model is selected using the
+corrected Akaike Information Criterion (AICc).
 
-Requiere: cdsapi, xarray, netCDF4, numpy, scipy, matplotlib
-    pip install cdsapi xarray netCDF4 scipy matplotlib
-y un ~/.cdsapirc con la key del Copernicus Data Store.
+Output:
+    Parameters (A_i, phi_i, sigma_i) ready to be used in the
+    Jet_Field() function of FluidSim, using centered coordinates
+    y = latitude − 15°N.
 """
 
 import os
@@ -26,7 +29,7 @@ YEARS     = range(1991, 2021)    # climatologia de 30 años
 MONTHS    = ["07", "08", "09"]   # JAS -> maximo del CLLJ
 
 AREA      = [25, -120, 5, -60]   # caja de descarga [N, W, S, E]
-LON_FIT   = (-90.0, -60.0)       # nucleo caribeño
+LON_FIT   = (-100.0, -60.0)      # dominio longitudinal del ajuste
 LAT_FIT   = (5.0, 25.0)
 
 LAT0      = 15.0    # centro del dominio -> y = 0 en coordenada centrada
@@ -193,7 +196,7 @@ def report_one(fit):
 
 def report_comparison(fits):
     print("\n" + "=" * 70)
-    print("COMPARACION DE MODELOS  |  CLLJ 925 hPa  |  JAS  |  90W-80W")
+    print("COMPARACION DE MODELOS  |  CLLJ 925 hPa  |  JAS  |  100W-60W")
     print("=" * 70)
     for f in fits:
         report_one(f)

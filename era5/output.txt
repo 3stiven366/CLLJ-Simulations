@@ -1,0 +1,53 @@
+======================================================================
+COMPARACION DE MODELOS  |  CLLJ 925 hPa  |  JAS  |  100W-60W
+======================================================================
+
+--- 1 gaussiana(s) | RMSE 1.443 m/s | R2 0.7525 | AICc 67.89 ---
+ i          A_i [m/s]      phi_i [deg y]   lat real      sigma_i [deg]  ok
+ 1    -7.036+-0.304       2.479+-0.283       17.48N     5.342+-0.321    si
+
+--- 2 gaussiana(s) | RMSE 0.771 m/s | R2 0.9293 | AICc -26.55 ---
+ i          A_i [m/s]      phi_i [deg y]   lat real      sigma_i [deg]  ok
+ 1    -5.575+-0.913      -2.017+-0.168       12.98N     2.014+-0.241    si
+ 2    -5.981+-0.204       5.101+-0.512       20.10N     4.503+-0.728    si
+
+--- 3 gaussiana(s) | RMSE 0.569 m/s | R2 0.9616 | AICc -68.31 ---
+ i          A_i [m/s]      phi_i [deg y]   lat real      sigma_i [deg]  ok
+ 1    -6.112+-1.362      -2.840+-0.286       12.16N     1.380+-0.155    si
+ 2    -4.974+-1.733       0.733+-0.444       15.73N     1.940+-0.700    si
+ 3    -5.523+-0.265       6.593+-0.817       21.59N     3.480+-0.960    si
+
+----------------------------------------------------------------------
+    modelo    k      RMSE        R2       AICc     dAICc   restringidas
+----------------------------------------------------------------------
+      1 gauss    4     1.443    0.7525      67.89    136.20        1/1    
+      2 gauss    7     0.771    0.9293     -26.55     41.76        2/2    
+      3 gauss   10     0.569    0.9616     -68.31      0.00        3/3      <-- mejor
+
+Criterio: menor AICc gana. dAICc < 2 -> modelos equivalentes;
+dAICc > 10 -> el modelo peor queda descartado.
+'restringidas' = componentes con |A| > 2*sigma_A (senal > 2-sigma).
+
+----------------------------------------------------------------------
+Bloque para Jet_Field()  [modelo seleccionado: 3 gaussiana(s)]
+----------------------------------------------------------------------
+    for lat, amp, sigma in [
+        ( -2.840*m,   -6.112,  1.380*m),   # lat real 12.16N
+        (  6.593*m,   -5.523,  3.480*m),   # lat real 21.59N
+        (  0.733*m,   -4.974,  1.940*m),   # lat real 15.73N
+    ]:
+        u_bar += amp * np.exp(-((lats - lat)**2 / (2*sigma**2)))
+
+----------------------------------------------------------------------
+Nucleo del CLLJ (componente dominante):
+----------------------------------------------------------------------
+  Latitud       : 12.16 +- 0.29 N   (y = -2.84 deg)
+  Intensidad    : -6.11 +- 1.36 m/s
+  sigma         : 1.38 +- 0.16 deg
+  FWHM (2.355s) : 3.25 +- 0.37 deg
+
+  [aviso] el nucleo cae 2.84 deg fuera del centro de la
+          grilla (y=0 <-> 15N). Considerar recentrar el
+          dominio en 12.2N, o verificar estabilidad
+          numerica con el jet descentrado.
+
