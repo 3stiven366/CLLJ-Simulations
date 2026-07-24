@@ -1,0 +1,61 @@
+[load] cargando simulacion desde:
+       ~/Documentos/Laboratorio/Cluster_Inestabilidad/NS2D_1024x512_S4440000x2220000_2026-07-23_17-10-02
+*************************************
+Program fluidsim
+sim:                <class 'fluidsim.solvers.ns2d.solver.Simul'>
+sim.output:         <class 'fluidsim.solvers.ns2d.output.Output'>
+sim.oper:           <class 'fluidsim.operators.operators2d.OperatorsPseudoSpectral2D'>
+sim.state:          <class 'fluidsim.solvers.ns2d.state.StateNS2D'>
+sim.time_stepping:  <class 'fluidsim.base.time_stepping.pseudo_spect.TimeSteppingPseudoSpectral'>
+sim.init_fields:    <class 'fluidsim.solvers.ns2d.init_fields.InitFieldsNS2D'>
+sim.forcing:        <class 'fluidsim.solvers.ns2d.forcing.ForcingNS2D'>
+
+solver NS2D, RK4 and sequential,
+type fft: fluidfft.fft2d.with_pyfftw
+nx =      4 ; ny =      4
+lx = 4440000 ; ly = 2220000
+path_run =
+/home/Estiven/Documentos/Laboratorio/Cluster_Inestabilidad/NS2D_1024x512_S4440000x2220000_2026-07-23_17-10-02
+init_fields.type: constant
+
+Initialization outputs:
+sim.output.increments:             <class 'fluidsim.base.output.increments.Increments'>
+sim.output.phys_fields:            <class 'fluidsim.base.output.phys_fields2d.PhysFieldsBase2D'>
+sim.output.spatial_means:          <class 'fluidsim.solvers.ns2d.output.spatial_means.SpatialMeansNS2D'>
+sim.output.spatiotemporal_spectra: <class 'fluidsim.solvers.ns2d.output.spatiotemporal_spectra.SpatioTemporalSpectraNS2D'>
+sim.output.spect_energy_budg:      <class 'fluidsim.solvers.ns2d.output.spect_energy_budget.SpectralEnergyBudgetNS2D'>
+sim.output.spectra:                <class 'fluidsim.solvers.ns2d.output.spectra.SpectraNS2D'>
+sim.output.spectra_multidim:       <class 'fluidsim.solvers.ns2d.output.spectra_multidim.SpectraMultiDimNS2D'>
+sim.output.temporal_spectra:       <class 'fluidsim.base.output.temporal_spectra.TemporalSpectra2D'>
+
+Memory usage at the end of init. (equiv. seq.): 268.8203125 Mo
+Size of state_spect (equiv. seq.): 0.000192 Mo
+[out ] figuras -> /home/Estiven/Documentos/Laboratorio/Cluster_Inestabilidad/NS2D_1024x512_S4440000x2220000_2026-07-23_17-10-02/figuras
+[time] 2161 campos guardados: t = 0 .. 7776028 s (0.00 .. 90.00 dias)
+[grid] ny=512  Ly=2220000 m  dy=4335.9 m  lat 5.0-25.0 N
+
+[1/3] Rayleigh-Kuo ...
+     =======================================================
+     dq/dy < 0 en 170/512 puntos (5.8 - 20.2 N)
+     cruce(s) de signo en: 5.8N, 6.3N, 11.6N, 11.8N, 14.3N, 20.2N
+     -> CONDICION NECESARIA de inestabilidad CUMPLIDA
+     dq/dy: min -1.001e-10  max 1.693e-10
+
+[2/3] CBT y EKE ...
+     EKE(t_last) = 1198.9352 m2/s2
+     CBT(y) max  = 6.513e-03 m2/s3
+     int CBT dy  = 1.732e+03 m3/s3  (jet->onda)
+
+[3/3] Hovmoller de v' ...
+     H shape = (2161, 512)  (tiempos x latitudes)
+
+============================================================
+LISTO. Figuras guardadas en:
+  /home/Estiven/Documentos/Laboratorio/Cluster_Inestabilidad/NS2D_1024x512_S4440000x2220000_2026-07-23_17-10-02/figuras
+
+Para bajarlas a tu PC:
+  scp usuario@cluster:/home/Estiven/Documentos/Laboratorio/Cluster_Inestabilidad/NS2D_1024x512_S4440000x2220000_2026-07-23_17-10-02/figuras/*.png .
+============================================================
+
+░▒▓   …/Inestabilidad_Barotropica/analysis   main !   23:11  
+

@@ -33,7 +33,7 @@ M        = 111e3       # grados -> metros
 if len(sys.argv) > 1:
     PATH_RUN = sys.argv[1]
 else:
-    PATH_RUN = "~/Sim_data/barotropic_cllj_cluster/NS2D_1024x512_S13320000x2220000_2026-07-11_22-10-03"   # <-- editar si no se pasa por CLI
+    PATH_RUN = "~/Documentos/Laboratorio/Cluster_Inestabilidad/NS2D_1024x512_S4440000x2220000_2026-07-23_17-10-02"   # <-- editar si no se pasa por CLI
 
 # ------------------------------------------------------------------
 # 1. Cargar la simulacion (una sola vez)
@@ -165,7 +165,7 @@ for i, t in enumerate(times):
     up = ux - um[:, None]
     vp = uy
     EKE_t[i] = 0.5 * (up**2 + vp**2).mean()                  # escalar (dominio)
-    CBT_t[i] = np.trapz(-(up * vp).mean(axis=1) * np.gradient(um, dy), y_deg * M)
+    CBT_t[i] = np.trapezoid(-(up * vp).mean(axis=1) * np.gradient(um, dy), y_deg * M)
 
 fig, ax1 = plt.subplots(figsize=(10, 6))
 c1 = "tab:green"
