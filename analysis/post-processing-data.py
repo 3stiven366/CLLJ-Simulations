@@ -33,7 +33,7 @@ M        = 111e3       # grados -> metros
 if len(sys.argv) > 1:
     PATH_RUN = sys.argv[1]
 else:
-    PATH_RUN = "~/Documentos/Laboratorio/Cluster_Inestabilidad/NS2D_1024x512_S4440000x2220000_2026-07-23_17-10-02"   # <-- editar si no se pasa por CLI
+    PATH_RUN = "~/Documentos/Laboratorio/Cluster_Inestabilidad/CLLJ_N3"   # <-- editar si no se pasa por CLI
 
 # ------------------------------------------------------------------
 # 1. Cargar la simulacion (una sola vez)

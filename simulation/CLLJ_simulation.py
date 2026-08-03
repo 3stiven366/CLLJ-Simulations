@@ -133,20 +133,20 @@ NU_4: float = 2e13                      # [m⁴/s] hyperviscosity
 
 JET_PARAMS: list[tuple] = [
                                        # (lat_center [m], amplitude [m/s], sigma [m])
-    ( -3.297*m, -5.166, 1.058*m),                 # Núcleo CLLJ → 15°N real (y=0) 
-    (3.719*m, -6.816, 3.946*m),                 # Flanco sur  → 10°N real
-     ( 5*m, -8.0, 7*m),                 # Flanco norte → 20°N rea
+    ( -3.297, -5.166, 1.058),                 # Núcleo CLLJ → 15°N real (y=0) 
+    (3.719, -6.816, 3.946),                 # Flanco sur  → 10°N real
+     ( 5, -8.0, 7),                 # Flanco norte → 20°N rea
     ]
 #Latitud 15° <- centro (10°-20°)
 #Long 75° <- centro (60°-80°)
 # Max V = 15 m/s (Jet core)
 
 
-WAVE1 = dict(k=4, T_days=4.0, amp=7.5, lat0=-5*m, sigma_y = 5*m, phase0=0.0)
-WAVE2 = dict(k=5, T_days=3.5, amp=6.0, lat0=0.0*m, sigma_y=4*m, phase0=np.pi/3)
-WAVE3 = dict(k=6, T_days=3.0, amp=3.8, lat0=5*m, sigma_y=4*m, phase0=2*np.pi/3)
-WAVE4 = dict(k=7, T_days=5.0, amp=1.5, lat0=3*m, sigma_y=4*m, phase0=5*np.pi/3)
-
+WAVE1 = dict(wavelength = 3_000_000.0, T_days=4.0,
+             amp=5.5, speed = 30.0,
+             sigma_y = 5.0, sigma_x = 28.0,
+             lat0=15.0 , lon0 = -55.0,
+             phase=0.0)
  
 NOISE_SIGMA = 0.5                       # [m/s] Synthetic noise
  
@@ -203,6 +203,7 @@ params.output.periods_save.increments        = 3600.0       # [s]
 # SECTION 3 — PHYSICAL FUNCTIONS
 #------------------------------------------------------------------
 
+
 def Jet_Field(lats: np.ndarray) -> np.ndarray:
     """
     Compute the zonal-mean CLLJ profile as a superposition of Gaussians:
@@ -225,6 +226,8 @@ def Jet_Field(lats: np.ndarray) -> np.ndarray:
     """
     u_bar = np.zeros(len(lats))
     for lat0, amp, sigma in JET_PARAMS:
+        lat0 = (lat0 - 5.0) * m
+        sigma = sigma * m
         u_bar += amp * np.exp(-((lats - lat0)**2 / (2* sigma**2)))
     return u_bar
 
@@ -297,28 +300,44 @@ def easterly_wave(
     rot : np.ndarray, shape (ny_local, nx)
         Relative vorticity of the perturbation, zeta' = laplacian(psi') [s⁻¹].
     """
-    k       = wave_params['k']
+
+    l       = wave_params['wavelength']
     T       = wave_params['T_days'] * 86400.0   # [s]
     amp     = wave_params['amp']                # [m/s], exact max|u'|
-    lat0    = wave_params['lat0']
-    sigma_y = wave_params['sigma_y']
-    phase   = wave_params['phase0']
+    lat0    = (wave_params['lat0'] -5.0) * m  # [m], center of Gaussian envelope
+    sigma_y = wave_params['sigma_y'] * m
+    sigma_x = wave_params['sigma_x'] * m
+    speed   = wave_params['speed']
+    phase   = wave_params['phase'] 
+    lon0    = (wave_params['lon0'] + 100.0) * m  # [m], center of Gaussian envelope
 
     X, Y = np.meshgrid(lons, lats)
-    kx = 2 * np.pi * k / params.oper.Lx      # physical zonal wavenumber [rad/m]
+
+    k = 2 * np.pi/l      # physical zonal wavenumber [rad/m]
     omega = 2 * np.pi / T
-    theta = kx * X + omega * t + phase
+    theta = k * X + omega * t  + phase
 
-    dY = Y - lat0
-    envelope = np.exp(-(dY**2) / (2 * sigma_y**2))
-    C   = amp * sigma_y * np.sqrt(np.e)
-    A   = C * envelope                                           # [m^2/s]
-    dA  = -(dY / sigma_y**2) * A                                  # A'(y)  [m/s]
-    d2A = (dY**2 / sigma_y**4 - 1.0 / sigma_y**2) * A             # A''(y) [1/s]
+    delta_y = Y - lat0
+    delta_x = X  - (lon0 - speed * t)
 
-    u_prime = dA * np.sin(theta)
-    v_prime = -kx * A * np.cos(theta)
-    rot     = (d2A - kx**2 * A) * np.sin(theta)
+    G = np.exp(-(delta_y**2) / (2 * sigma_y**2)) * np.exp(-(delta_x**2) / (2 * sigma_x**2))
+    C   = amp / k  # [m^2/s]
+    Psi   = C * G * np.sin(theta)  # [m^2/s]
+                                      
+    u_prime = -1 *(delta_y / sigma_y**2) * Psi  # [m/s]  
+    v_prime =   (delta_x / sigma_x**2) * Psi  - C * G * k * np.cos(theta) # [m/s]
+
+    curvature = (
+        sigma_x**4 * delta_y**2
+        + sigma_y**4 * delta_x**2
+        - sigma_x**4 * sigma_y**4 * k**2
+        - sigma_x**2 * sigma_y**4
+        - sigma_x**4 * sigma_y**2)
+
+    rot = ( -curvature * Psi
+           -2 * C * G * sigma_x**2 * sigma_y**4 * k * delta_x * np.cos(theta)
+           ) / (sigma_x**4 * sigma_y**4)
+    
 
     return u_prime, v_prime, rot
 
@@ -368,14 +387,9 @@ y = sim.oper.y - params.oper.Ly / 2
 # Definition of the velocity field
 u_bar_1d = Jet_Field(y) 
 u_mean = np.tile(u_bar_1d[:, None], (1, len(x)))
-# Introduction of perturbations
-u_prime1, v_prime1, rot1 = easterly_wave(y, x, t=0, wave_params=WAVE1)
-u_prime2, v_prime2, rot2 = easterly_wave(y, x, t=0, wave_params=WAVE2)
-u_prime3, v_prime3, rot3 = easterly_wave(y, x, t=0, wave_params=WAVE3)
-u_prime4, v_prime4, rot4 = easterly_wave(y, x, t=0, wave_params=WAVE4)
 
-U = add_noise(u_mean + u_prime1 + u_prime2 + u_prime3 +u_prime4, seed = rank)
-V = add_noise(v_prime1 + v_prime2 + v_prime3 + v_prime4, seed = rank + 1000)
+U = add_noise(u_mean, seed = rank)
+V = np.zeros_like(U)  # No mean meridional flow
 
 # Vorticity 
 dudy = np.gradient(U, oper.deltay, axis=0)
@@ -455,6 +469,10 @@ if params.forcing.enable:
         t_now = sim.time_stepping.t
     
         F = np.zeros((len(y), len(x)))
+        """
+        Change the way that the forcing is computed each time. 
+        A dict of diferent wave parameters is needed. 
+        """
     
         for wave_params in (WAVE1, WAVE2, WAVE3, WAVE4):
             _, _, rot = easterly_wave(y, x, t_now, wave_params)
