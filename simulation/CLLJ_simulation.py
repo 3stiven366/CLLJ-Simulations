@@ -1,109 +1,8 @@
-"""
-CLLJ_simulation.py
-==============================
-Two-dimensional barotropic vorticity simulation of Easterly Wave–Caribbean
-Low-Level Jet (EW–CLLJ) interactions over the Intra-Americas Seas (IAS).
-
-Physical motivation
--------------------
-Rivera (2026) documents that the CLLJ provides a barotropically unstable
-mean-flow environment for tropical easterly waves during boreal summer. The
-Rayleigh–Kuo criterion (∂q̄/∂y changes sign) is satisfied over most of the
-OTREC 2019 period, and positive eddy momentum covariance ⟨u′v′⟩ at
-Guanacaste and San Andrés indicates mean-to-eddy energy transfer (CK > 0).
-
-This model captures those mechanisms using the 2D barotropic vorticity
-equation on a β-plane:
-
-    ∂ζ/∂t + J(ψ, ζ + f) = ν₄∇⁴ζ + F
-
-where ζ = ∇²ψ is the relative vorticity, f = f₀ + βy is the Coriolis
-parameter, ν₄ is the hyperviscosity, and F is the prescribed vorticity
-forcing that continuously replenishes the easterly-wave structure.
-
-Diagnostics of interest
------------------------
-Rayleigh–Kuo criterion  : β − ∂²ū/∂y²  (sign change ⇒ necessary condition)
-Barotropic conversion   : CK = −⟨u′v′⟩ ∂ū/∂y  (CK > 0 ⇒ jet → eddies)
-Eddy kinetic energy     : EKE = ½⟨u′² + v′²⟩
-
-Governing parameters
---------------------
-Domain       : 120° × 20°  (100°W–60°W, 5°N–25°N; y = 0 ↔ 15°N)
-Resolution   : nx=1024, ny=512  →  Δx ≈ 0.117°, Δy ≈ 0.039°
-β            : 2.29×10⁻¹¹ s⁻¹m⁻¹  (tropical β-plane at ~15°N)
-ν₄           : 2×10¹³ m⁴/s        (rescaled with resolution as Δx⁴)
-Δt_max       : 50 s               (CFL-stable; U_max ≈ 12 m/s)
-Integration  : 90 days            (JAS boreal summer season)
-Jet profile  : 2-Gaussian fit to ERA5 JAS climatology (925 hPa,
-               90°W–80°W, 1991–2020); narrow CLLJ core near 11.7°N
-               plus a broad component near 18.7°N
-Waves        : 4 modes, k = 4–7, T = 3–5 days (observed EW band)
-
-Forcing formulation
--------------------
-The forcing term F is a *rate of vorticity injection* [s⁻²], not a vorticity
-field [s⁻¹] — every term in the vorticity equation above carries units of
-[s⁻²]. `easterly_wave` returns ζ′ = ∇²ψ′ in [s⁻¹], so each wave mode is
-normalised by its own period T_i to obtain the required rate:
-
-    F = Σ_i ζ′_i / T_i          [s⁻¹] / [s] = [s⁻²]
-
-Sustained over a time T_i, the forcing accumulates a vorticity of magnitude
-ζ′_i, i.e. it rebuilds one full wave structure in one wave period. This
-leaves no free tuning parameter: T_i is fixed by the prescribed wave period.
-
-Passing ζ′ directly as F is dimensionally inconsistent and injects vorticity
-orders of magnitude above the mean-flow shear within the first simulated
-hour, collapsing the adaptive time step (Δt → 10⁻² s).
-
-The model uses params.forcing.type = "in_script", NOT "in_script_coarse".
-With `in_script`, the array returned by compute_forcing_each_time is
-transformed by the (normalised) oper.fft and added directly to the nonlinear
-tendencies, so the injected amplitude is fully under user control. With
-`in_script_coarse`, FluidSim builds a reduced grid whose size it sets
-internally and renormalises the forcing, which for a spatially structured
-forcing such as a prescribed wave introduces large coarse-to-fine
-amplification factors.
-
-MPI notes
----------
-This script runs identically with and without MPI:
-
-    python CLLJ_simulation.py                    # serial
-    mpirun -np 64 python CLLJ_simulation.py      # parallel
-
-FluidSim decomposes the domain across ranks with the fft2d.mpi_with_fftw1d
-backend. Not every (resolution, nproc) pair is valid, and the constraint is
-not simply "ny divisible by nproc". The configuration below (ny=512, 64
-processes) is verified to run; if the resolution or the process count is
-changed, confirm the new pair on a short test run before committing to a
-long production job.
-
-Variable scope under MPI
-------------------------
-Global (identical across all ranks):
-    params, period, m, all physical constants, all functions.
-Local (each rank holds its own subdomain slice):
-    x, y, u_mean, U, V, rot, omega_fft.
-
-Every rank evaluates the forcing on its own local subdomain — x and y already
-hold each rank's local coordinates — and FluidSim assembles the global field
-internally. No rank-0 guard is used (that pattern belongs to the abandoned
-`in_script_coarse` mode, where only rank 0 holds oper_coarse).
-
-Reference
----------
-Rivera, E.R. (2026). On the Interaction of Tropical Easterly Waves and the
-Caribbean Low-Level Jet Using Observed, ERA5 and WWLLN Data over the
-Intra-Americas Seas During OTREC 2019. Meteorology, 5(1), 6.
-https://doi.org/10.3390/meteorology5010006
-"""
-
-
 from fluidsim.solvers.ns2d.solver import Simul
 from fluiddyn.util.mpi import rank, comm, nb_proc  
 import numpy as np
+import os
+import csv
 import time 
 
 t_inicio = time.time()
@@ -111,16 +10,23 @@ t_inicio = time.time()
 #  SECTION 1 — GLOBAL CONSTANTS 
 # ============================================================================
 
-ACTIVE_FORCING = True                   # True / False
+# Control del forzamiento. El mecanismo de fluidsim se mantiene SIEMPRE activo
+# porque el nudging del jet lo necesita; ACTIVE_WAVES decide si además se
+# inyectan ondas del este.
+
+ACTIVE_WAVES: bool = True       # True: ondas + jet   |   False: solo jet
+ACTIVE_JET_NUDGING: bool = True # sostener el jet contra la disipación
 
 np.random.seed(42)
-m: float = 111e3                        # Degrees to meters
+PHI_REF = 15.0
+M_LAT = 111e3
+M_LON = 111e3 * np.cos(np.radians(PHI_REF))
 days: int = 2                          # Days of simulation
 period: int = 86400 * days              # [s]
 
-Lx_deg: int = 40                       # [°]  zonal domain (100°W - 60°W)
+Lx_deg: int = 40  #140                     # [°]  zonal domain (140°W - 20°W)
 Ly_deg: int = 20                        # [°] southern domain (25°N - 5°N )
-Nx: int    = 256 #1024                        # Zonal points   
+Nx: int    = 256 #4096                        # Zonal points   
 Ny: int    = 128 #512                        # Southern points 
 
 TAU_RELAX: float = 7 * 86400.0          # [s] escala de relajación del jet (~7 días)
@@ -136,12 +42,14 @@ NU_2: float             = C_REPRESENTATIVE / (BETA * TAU_SPINDOWN)   # ≈ 4.5e5
 NU_4: float             = 2e13                                       # [m⁴/s] hyperviscosity
 #_________________________
 
+LAT_MIN: float = 5.0        # [°N] borde sur del dominio (y = 0)
+TAPER_DEG: float = 3.0 
 
 JET_PARAMS: list[tuple] = [  
     # (lat_center [m], amplitude [m/s], sigma [m])
-    ( -3.297, -5.166, 1.058),          
-    (3.719, -6.816, 3.946),            
-     ( 5, -8.0, 7),                 
+    ( 12.160,   -6.112,  1.380),
+    ( 21.593,   -5.523,  3.480),
+    ( 15.733,   -4.974,  1.940),
     ]
 
 
@@ -149,11 +57,12 @@ JET_PARAMS: list[tuple] = [
 # ── Catálogo de eventos de onda del este ────────────────────────────────────
 CATALOG_SEED       = 12345
 EVENT_SPACING_DAYS = 7.0     # tiempo entre nacimientos consecutivos [días]
-T_INJECT_DAYS      = 3.0     # duración de la inyección (canilla abierta) [días]
-T_RAMP_DAYS        = 1.0     # rampas suaves de subida/bajada [días]
+T_INJECT_DAYS      = 1.5     # duración de la inyección (canilla abierta) [días]
+T_RAMP_DAYS        = 0.5     # rampas suaves de subida/bajada [días]
+
 
 WAVE_RANGES = dict(
-    wavelength = (2.5e6, 4.0e6),    # [m]   banda objetivo (se cuantiza, ver nota)
+    wavelength = (2.5e6, 4.0e6),    # [m]   banda objetivo 
     c_phase    = (7.0, 12.0),       # [m/s] fase hacia el oeste
     amp        = (3.0, 8.0),        # [m/s] pico de v'
     lat0_deg   = (11.0, 17.0),      # [°N]
@@ -161,22 +70,10 @@ WAVE_RANGES = dict(
     sigma_x    = (4.0, 7.0),        # [°]
 )
 
-# NOTE: the 40°-wide periodic domain only admits integer numbers of wave cycles,
-# so wavelengths are quantized to Lx/n (n=1,2 here → 4440, 2220 km). The AEW band
-# 2500–4000 km is therefore represented by two discrete values only. Whether a
-# domain this narrow is adequate for the target region is left as an open question
-# to review with the advisor; the quantization keeps the carrier periodic meanwhile.
 
-#________________________
-
-CATALOG_SEED = 12345
-GAP_DAYS     = 0.0
  
 NOISE_SIGMA = 0.5                       # [m/s] Synthetic noise
- 
-# Spectral forcing
-NK_MAX_FORCING = 7 #4
-NK_MIN_FORCING = 3 #2
+
 
 # ============================================================================
 # SECTION 2 — FLUIDSIM PARAMETER CONFIGURATION
@@ -186,8 +83,8 @@ NK_MIN_FORCING = 3 #2
 params = Simul.create_default_params()
 params.oper.type_fft = "fft2d.mpi_with_fftw1d"
 # Domain
-params.oper.Lx = Lx_deg * m  # [m]
-params.oper.Ly = Ly_deg * m  # [m]
+params.oper.Lx = Lx_deg * M_LON  # [m]
+params.oper.Ly = Ly_deg * M_LAT  # [m]
 params.oper.nx = Nx
 params.oper.ny = Ny
 params.oper.coef_dealiasing = 2/3 
@@ -207,14 +104,13 @@ params.time_stepping.deltat0 = float(20)        # [s] 100
 params.init_fields.type = "in_script"
 
 # Activation of the forcing with monkey-patching
-params.forcing.enable = ACTIVE_FORCING
+params.forcing.enable = ACTIVE_WAVES or ACTIVE_JET_NUDGING
 params.forcing.type = "in_script"
-#params.forcing.nkmax_forcing = NK_MAX_FORCING
-#params.forcing.nkmin_forcing = NK_MIN_FORCING
 params.forcing.key_forced = "rot_fft"
 
 # Output
-params.output.sub_directory                  = "barotropic_cllj_cluster"
+_tag = f"{'W' if ACTIVE_WAVES else 'noW'}_{'N' if ACTIVE_JET_NUDGING else 'noN'}"
+params.output.sub_directory = f"barotropic_cllj_{_tag}"
 params.output.periods_print.print_stdout     = 3600.0       # [s]
 params.output.periods_save.phys_fields       = 3600.0       # [s] 
 params.output.periods_save.spectra           = 3600.0       # [s] 
@@ -227,6 +123,16 @@ params.output.periods_save.increments        = 3600.0       # [s]
 # SECTION 3 — PHYSICAL FUNCTIONS
 #------------------------------------------------------------------
 
+def _taper(lats: np.ndarray) -> np.ndarray:
+    
+    L = Ly_deg * M_LAT
+    w = TAPER_DEG * M_LAT
+    t = np.ones_like(lats)
+    m1 = lats < w
+    t[m1] = 0.5 * (1.0 - np.cos(np.pi * lats[m1] / w))
+    m2 = lats > L - w
+    t[m2] = 0.5 * (1.0 - np.cos(np.pi * (L - lats[m2]) / w))
+    return t
 
 def Jet_Field(lats: np.ndarray) -> np.ndarray:
     """
@@ -250,91 +156,72 @@ def Jet_Field(lats: np.ndarray) -> np.ndarray:
     """
     u_bar = np.zeros(len(lats))
     for lat0, amp, sigma in JET_PARAMS:
-        lat0 = (lat0 - 5.0) * m
-        sigma = sigma * m
+        lat0 = (lat0 - LAT_MIN) * M_LAT
+        sigma = sigma * M_LAT
         u_bar += amp * np.exp(-((lats - lat0)**2 / (2* sigma**2)))
-    return u_bar
+    return u_bar * _taper(lats)
+
+
+
+def _dtaper(lats: np.ndarray) -> np.ndarray:
+
+    L = Ly_deg * M_LAT
+    w = TAPER_DEG * M_LAT
+    d = np.zeros_like(lats)
+    m1 = lats < w
+    d[m1] =  0.5 * (np.pi / w) * np.sin(np.pi * lats[m1] / w)
+    m2 = lats > L - w
+    d[m2] = -0.5 * (np.pi / w) * np.sin(np.pi * (L - lats[m2]) / w)
+    return d
 
 def jet_vorticity(lats: np.ndarray) -> np.ndarray:
-    """Vorticidad analítica del jet base: zeta_jet = -du_bar/dy."""
-    zeta = np.zeros(len(lats))
-    for lat0, amp, sigma in JET_PARAMS:
-        lat0 = (lat0 - 5.0) * m
-        sigma = sigma * m
-        dudy = amp * np.exp(-((lats - lat0)**2) / (2*sigma**2)) * (-(lats - lat0)/sigma**2)
-        zeta += -dudy
-    return zeta
+    u  = np.zeros_like(lats)
+    du = np.zeros_like(lats)
+    for lat_real, amp, sigma in JET_PARAMS:
+        y0 = (lat_real - LAT_MIN) * M_LAT
+        sg = sigma * M_LAT
+        g = amp * np.exp(-((lats - y0)**2) / (2 * sg**2))
+        u  += g
+        du += g * (-(lats - y0) / sg**2)
+    return -(du * _taper(lats) + u * _dtaper(lats))
 
 def quantize_wavelength(lam_target, Lx):
-    """
-    Snap a desired wavelength to one that fits an INTEGER number of full cycles
-    in the periodic domain: lambda_q = Lx / n, with n = round(Lx / lam_target).
-
-    Why this is necessary
-    ---------------------
-    The carrier sin(k x + phase) is only continuous across the periodic boundary
-    x=0 ≡ x=Lx when k*Lx = 2*pi*n with n integer, i.e. when a whole number of
-    wavelengths fits in the domain. Any other wavelength leaves a jump at the seam
-    that the FFT turns into Gibbs ringing (spurious energy across all scales,
-    injected every time step). Rounding n to the nearest integer removes the jump.
-
-    n is floored at 1 (n=0 would be a spatially constant field, i.e. no wave).
-    Note: on a 40° domain only n=1,2 fall in the AEW band, so distinct target
-    wavelengths can collapse onto the same quantized value.
-    """
     n = max(1, round(Lx / lam_target))
     return Lx / n, n
 
 
-def build_wave_catalog(t_max, Lx, seed=CATALOG_SEED, verbose=True):
-    """
-    Sequential (non-overlapping) train of easterly-wave events. Deterministic:
-    identical on every MPI rank because it uses a fixed seed and no MPI state.
-
-    Each event injects during a short window (T_INJECT_DAYS) shaped by a smooth
-    Hann-like envelope, then switches off, leaving a long free-evolution window
-    in which the already-injected wave crosses the jet and decays under nu_2.
-    """
-    rng = np.random.default_rng(seed)
-    events, t = [], 0.0
-    spacing = EVENT_SPACING_DAYS * 86400.0
-    while t < t_max:
-        lam_target = rng.uniform(*WAVE_RANGES['wavelength'])
-        lam_q, n   = quantize_wavelength(lam_target, Lx)
-        c_p        = rng.uniform(*WAVE_RANGES['c_phase'])
-        events.append(dict(
-            event_id   = len(events),
-            t_birth    = t,
-            wavelength_target = lam_target,     # sorteado (para el reporte)
-            wavelength = lam_q,                 # cuantizado (el que se usa)
-            n_cycles   = n,
-            c_phase    = c_p,
-            T          = lam_q / c_p,           # período coherente con λ cuantizada
-            x_entry    = rng.uniform(0.0, Lx),  # posición inicial del centro
-            amp        = rng.uniform(*WAVE_RANGES['amp']),
-            lat0       = (rng.uniform(*WAVE_RANGES['lat0_deg']) - 5.0) * m,
-            sigma_y    = rng.uniform(*WAVE_RANGES['sigma_y']) * m,
-            sigma_x    = rng.uniform(*WAVE_RANGES['sigma_x']) * m,
-            phase      = rng.uniform(0.0, 2.0 * np.pi),
-            t_inject   = T_INJECT_DAYS * 86400.0,
-            t_ramp     = T_RAMP_DAYS   * 86400.0,
-        ))
-        t += spacing
-
-    if verbose and rank == 0:
-        print(f"\n{'='*66}\nCatálogo de ondas: {len(events)} eventos "
-              f"(dominio {Lx/m:.0f}°, λ cuantizada a Lx/n)")
-        print(f"{'id':>3} {'nace(d)':>8} {'λ_sorteada':>11} {'n':>2} "
-              f"{'λ_real':>8} {'cambio':>8} {'c(m/s)':>7}")
-        for ev in events:
-            lt, lq = ev['wavelength_target'], ev['wavelength']
-            print(f"{ev['event_id']:>3} {ev['t_birth']/86400:>8.1f} "
-                  f"{lt/1e3:>9.0f}km {ev['n_cycles']:>2} {lq/1e3:>6.0f}km "
-                  f"{(lq-lt)/lt*100:>+7.1f}% {ev['c_phase']:>7.1f}")
-        print(f"{'='*66}\n")
-
-    return events
-
+def write_wave_catalog(path_run):
+    """Vuelca el catálogo completo de eventos a CSV. Solo rank 0, una vez."""
+    if rank != 0:
+        return
+    p = os.path.join(path_run, "wave_catalog.csv")
+    with open(p, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow([
+            "event_id", "t_birth_days", "t_inject_days", "t_ramp_days",
+            "wavelength_target_km", "wavelength_km", "n_cycles",
+            "T_days", "c_phase_ms", "amp_ms", "lat0_deg",
+            "sigma_y_deg", "sigma_x_deg", "phase_rad", "x_entry_km",
+        ])
+        for ev in WAVE_CATALOG:
+            w.writerow([
+                ev['event_id'],
+                round(ev['t_birth'] / 86400.0, 4),
+                round(ev['t_inject'] / 86400.0, 4),
+                round(ev['t_ramp'] / 86400.0, 4),
+                round(ev['wavelength_target'] / 1e3, 2),
+                round(ev['wavelength'] / 1e3, 2),
+                ev['n_cycles'],
+                round(ev['T'] / 86400.0, 4),
+                round(ev['c_phase'], 4),
+                round(ev['amp'], 4),
+                round(ev['lat0'] / M_LAT + 5.0, 4),
+                round(ev['sigma_y'] / M_LAT, 4),
+                round(ev['sigma_x'] / M_LON, 4),
+                round(ev['phase'], 6),
+                round(ev['x_entry'] / 1e3, 2),
+            ])
+    print(f"[rank 0] Catálogo escrito: {p} ({len(WAVE_CATALOG)} eventos)")
 
 def wave_envelope(t, ev):
     """
@@ -373,7 +260,7 @@ def easterly_wave_event(lats, lons, t, ev):
     if W == 0.0:
         return np.zeros((len(lats), len(lons)))
 
-    Lx = Lx_deg * m
+    Lx = Lx_deg * M_LON
     sigma_x, sigma_y = ev['sigma_x'], ev['sigma_y']
     k     = 2.0 * np.pi / ev['wavelength']
     omega = 2.0 * np.pi / ev['T']
@@ -403,14 +290,11 @@ def easterly_wave_event(lats, lons, t, ev):
     return rot * W
 
 
-def active_event(t_now, catalog=None):
-    """Devuelve el evento activo en t_now, o None si estamos en un gap."""
+def active_events(t_now, catalog=None):
+    """Devuelve la lista de eventos con la canilla abierta en t_now (puede ser >1)."""
     if catalog is None:
         catalog = WAVE_CATALOG
-    for ev in catalog:
-        if ev['t_birth'] <= t_now <= ev['t_death']:
-            return ev
-    return None
+    return [ev for ev in catalog if wave_envelope(t_now, ev) > 0.0]
 
 
 def add_noise(
@@ -437,6 +321,62 @@ def add_noise(
     rng = np.random.default_rng(seed)
     return field + rng.normal(0.0, sigma, field.shape)
 
+def build_wave_catalog(t_max, Lx, seed=CATALOG_SEED, verbose=True):   
+    """
+    Sequential train of easterly-wave events with QUANTIZED wavelengths.
+
+    Deterministic: identical on every MPI rank (fixed seed, no MPI state).
+
+    Each event injects during a short window (T_INJECT_DAYS) shaped by a smooth
+    cosine-ramp envelope, then switches off, leaving a long free-evolution window
+    in which the already-injected wave crosses the jet and decays under nu_2.
+
+    Wavelengths are snapped to Lx/n (see quantize_wavelength) so the carrier
+    closes on the periodic domain and no Gibbs ringing is injected at the seam.
+    The reported table shows the sampled vs the quantized value per event.
+    """
+    rng = np.random.default_rng(seed)
+    events, t = [], 0.0
+    spacing = EVENT_SPACING_DAYS * 86400.0
+    while t < t_max:
+        lam_target = rng.uniform(*WAVE_RANGES['wavelength'])
+        lam_q, n   = quantize_wavelength(lam_target, Lx)
+        c_p        = rng.uniform(*WAVE_RANGES['c_phase'])
+        events.append(dict(
+            event_id   = len(events),
+            t_birth    = t,
+            wavelength_target = lam_target,      # sorteado (para el reporte)
+            wavelength = lam_q,                  # cuantizado (el que se usa)
+            n_cycles   = n,
+            c_phase    = c_p,
+            T          = lam_q / c_p,            # [s] período
+            x_entry    = rng.uniform(0.0, Lx),
+            amp        = rng.uniform(*WAVE_RANGES['amp']),
+            lat0       = (rng.uniform(*WAVE_RANGES['lat0_deg']) - 5.0) * M_LAT,
+            sigma_y    = rng.uniform(*WAVE_RANGES['sigma_y']) * M_LAT,
+            sigma_x    = rng.uniform(*WAVE_RANGES['sigma_x']) * M_LON,
+            phase      = rng.uniform(0.0, 2.0 * np.pi),
+            t_inject   = T_INJECT_DAYS * 86400.0,
+            t_ramp     = T_RAMP_DAYS   * 86400.0,
+            W_integral = (T_INJECT_DAYS - T_RAMP_DAYS) * 86400.0,
+        ))
+        t += spacing
+
+    if verbose and rank == 0:
+        print(f"\n{'='*72}")
+        print(f"Catálogo de ondas: {len(events)} eventos  (λ cuantizada a Lx/n)")
+        print(f"{'id':>3} {'nace(d)':>8} {'λ_sorteada':>11} {'n':>3} "
+              f"{'λ_real':>9} {'cambio':>8} {'c(m/s)':>7} {'T(d)':>6}")
+        for ev in events:
+            lt, lq = ev['wavelength_target'], ev['wavelength']
+            print(f"{ev['event_id']:>3} {ev['t_birth']/86400:>8.1f} "
+                  f"{lt/1e3:>9.0f}km {ev['n_cycles']:>3} {lq/1e3:>7.0f}km "
+                  f"{(lq-lt)/lt*100:>+7.1f}% {ev['c_phase']:>7.1f} "
+                  f"{ev['T']/86400:>6.2f}")
+        print(f"{'='*72}\n")
+
+    return events
+
 
 
 #---------------------------------------------------------------------------
@@ -447,7 +387,7 @@ def add_noise(
 # local of each rank.
 #---------------------------------------------------------------------------
 
-WAVE_CATALOG = build_wave_catalog(period, Lx_deg * m)
+WAVE_CATALOG = build_wave_catalog(period, Lx_deg * M_LON)
 if rank == 0:
     print(f"Catálogo: {len(WAVE_CATALOG)} eventos de onda")
 
@@ -467,6 +407,10 @@ U = add_noise(u_mean, seed = rank)
 V = np.zeros_like(U)  # No mean meridional flow
 
 # Vorticity 
+
+"""
+Aquí puedo utilizar simplemente la función de vorticidad del jet
+"""
 dudy = np.gradient(U, oper.deltay, axis=0)
 dvdx = np.gradient(V, oper.deltax, axis=1)
 rot = dvdx - dudy
@@ -485,8 +429,6 @@ if nb_proc > 1:
 # ─────────────────────────────────────────────────────────────────────────
 # SECTION 5 — DIAGNOSTIC LOGGING
 # ─────────────────────────────────────────────────────────────────────────
-import os
-import csv
 
 LOG_EVERY_S   = 600.0      # cadencia de registro de series temporales [s]
 FLUSH_EVERY_N = 200        # filas en buffer antes de volcar a disco
@@ -506,39 +448,6 @@ def global_mean(field_local):
     return s / n
 
 
-def write_wave_catalog(path_run):
-    """Vuelca el catálogo completo de eventos a CSV. Solo rank 0, una vez."""
-    if rank != 0:
-        return
-    p = os.path.join(path_run, "wave_catalog.csv")
-    with open(p, "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow([
-            "event_id", "t_birth_days", "t_death_days", "duration_days",
-            "wavelength_km", "T_days", "c_phase_ms", "c_group_ms",
-            "amp_ms", "lat0_deg", "sigma_y_deg", "sigma_x_deg",
-            "phase_rad", "x_entry_km",
-        ])
-        for ev in WAVE_CATALOG:
-            w.writerow([
-                ev['event_id'],
-                round(ev['t_birth'] / 86400.0, 4),
-                round(ev['t_death'] / 86400.0, 4),
-                round((ev['t_death'] - ev['t_birth']) / 86400.0, 4),
-                round(ev['wavelength'] / 1e3, 2),
-                round(ev['T'] / 86400.0, 4),
-                round(ev['wavelength'] / ev['T'], 4),
-                round(ev['c_group'], 4),
-                round(ev['amp'], 4),
-                round(ev['lat0'] / m + 5.0, 4),
-                round(ev['sigma_y'] / m, 4),
-                round(ev['sigma_x'] / m, 4),
-                round(ev['phase'], 6),
-                round(ev['x_entry'] / 1e3, 2),
-            ])
-    print(f"[rank 0] Catálogo escrito: {p} ({len(WAVE_CATALOG)} eventos)")
-
-
 def init_diagnostics(path_run):
     """Crea el CSV de series temporales con su encabezado. Solo rank 0."""
     if rank != 0:
@@ -546,7 +455,8 @@ def init_diagnostics(path_run):
     _diag_path[0] = os.path.join(path_run, "jet_diagnostics.csv")
     with open(_diag_path[0], "w", newline="") as f:
         csv.writer(f).writerow([
-            "t_days", "A_jet", "event_id", "KE_zonal", "KE_eddy", "F_jet_rate",
+            "t_days", "A_jet", "event_id", "n_active",
+            "KE_zonal", "KE_eddy", "F_jet_rate",
         ])
 
 
@@ -569,15 +479,24 @@ def split_kinetic_energy():
     ke_edd = 0.5 * global_mean((ux - ux_bar)**2 + (uy - uy_bar)**2)
     return ke_zon, ke_edd
 
-
 # ─────────────────────────────────────────────────────────────────────────
-# SECTION 6— TIME-DEPENDENT FORCING
+# SECTION 6 — TIME-DEPENDENT FORCING
 #
-# Only rank 0 evaluates the function; FluidSim distributes the result.
-# oper_coarse is defined outside the if rank==0 so that it is accessible
-# within compute_forcingc_each_time from any process.
+# Every rank evaluates the forcing on its own local subdomain: x and y already
+# hold each rank's local coordinates. FluidSim assembles the global field
+# internally and transforms the returned array to Fourier space.
+#
+# Units: the returned array is a vorticity injection RATE [s^-2], since it is
+# added to tendencies_fft, which represents dzeta/dt.
+#
+# Two contributions:
+#   1. Easterly-wave events: each active event deposits its nominal amplitude
+#      over the injection window, normalised by W_integral so the total injected
+#      vorticity equals zeta'_nominal regardless of the event's period.
+#   2. Jet nudging: one-sided (floor only) relaxation of the ZONAL MEAN towards
+#      the base jet profile, projected onto zeta_jet so only the amplitude is
+#      constrained, never the shape, and never the eddies.
 # ─────────────────────────────────────────────────────────────────────────
-
 
 
 if params.forcing.enable:
@@ -587,11 +506,15 @@ if params.forcing.enable:
         t_now = sim.time_stepping.t
         F = np.zeros((len(y), len(x)))
 
-        # --- Onda del este activa (a lo sumo una) ---
-        ev = active_event(t_now)
-        event_id = ev['event_id'] if ev is not None else -1
-        if ev is not None:
-            F += easterly_wave_event(y, x, t_now, ev) / ev['T']
+        # --- Ondas del este activas (solo si ACTIVE_WAVES) ---
+        event_id = -1
+        n_active = 0
+        if ACTIVE_WAVES:
+            evs = active_events(t_now)
+            event_id = evs[0]['event_id'] if evs else -1
+            n_active = len(evs)
+            for ev in evs:
+                F += easterly_wave_event(y, x, t_now, ev) / ev['W_integral']
 
         # --- Nudging unidireccional del jet (solo piso) ---
         rot_now  = sim.oper.ifft2(sim.state.state_spect.get_var('rot_fft'))
@@ -603,24 +526,23 @@ if params.forcing.enable:
         A = num / DENOM
 
         F_rate = 0.0
-        if A < 1.0:
+        if ACTIVE_JET_NUDGING and A < 1.0:
             F_rate = (1.0 - A) / TAU_RELAX
             F += F_rate * ZETA_JET_TARGET[:, None]
 
         # --- Registro de diagnósticos ---
         if t_now - _last_log_t[0] >= LOG_EVERY_S:
             _last_log_t[0] = t_now
-            ke_z, ke_e = split_kinetic_energy()      # colectivo: TODOS los ranks
+            ke_z, ke_e = split_kinetic_energy()
             if rank == 0:
                 _diag_rows.append([
-                    round(t_now / 86400.0, 6), round(A, 8), event_id,
+                    round(t_now / 86400.0, 6), round(A, 8), event_id, n_active,
                     round(ke_z, 8), round(ke_e, 8), F_rate,
                 ])
                 if len(_diag_rows) >= FLUSH_EVERY_N:
                     flush_diagnostics()
 
         return F
-
 
     forcing_maker.monkeypatch_compute_forcing_each_time(compute_forcing_each_time)
 
@@ -658,7 +580,7 @@ if rank == 0:
 
 # then in ipython (copy the line in the terminal):
 
-sim.output.phys_fields.animate('b', dt_frame_in_sec=0.1, dt_equations=0.1)
+sim.output.phys_fields.animate('rot', dt_frame_in_sec=0.1, dt_equations=0.1)
 """
     )
 

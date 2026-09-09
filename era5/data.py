@@ -19,6 +19,11 @@ import numpy as np
 import xarray as xr
 from scipy.optimize import curve_fit
 import matplotlib.pyplot as plt
+from scipy.signal import savgol_filter
+
+OMEGA   = 7.2921e-5      # [rad/s] rotación terrestre
+A_EARTH = 6.371e6        # [m] radio terrestre
+
 
 # ------------------------------------------------------------------
 # 0. Configuracion
@@ -28,7 +33,7 @@ LEVEL     = "925"                # nucleo del CLLJ
 YEARS     = range(1991, 2021)    # climatologia de 30 años
 MONTHS    = ["07", "08", "09"]   # JAS -> maximo del CLLJ
 
-AREA      = [25, -120, 5, -60]   # caja de descarga [N, W, S, E]
+AREA      = [34, -160, 5, -20]  # caja de descarga [N, W, S, E]
 LON_FIT   = (-100.0, -60.0)      # dominio longitudinal del ajuste
 LAT_FIT   = (5.0, 25.0)
 
@@ -36,6 +41,169 @@ LAT0      = 15.0    # centro del dominio -> y = 0 en coordenada centrada
 M         = 111e3   # grados -> metros
 
 N_COMPONENTS = [1, 2, 3]   # modelos a comparar
+
+# _________________________________________________________
+# Rayleigh
+# _________________________________________________________
+
+def beta_local(lat_deg):
+    """beta(phi) = 2*Omega*cos(phi)/a  [1/(m s)]."""
+    return 2.0 * OMEGA * np.cos(np.radians(lat_deg)) / A_EARTH
+ 
+ 
+def d2u_analytic(y_deg, popt, M):
+    """
+    Segunda derivada analítica de la suma de gaussianas, en unidades SI.
+ 
+    u(y) = sum_i A_i exp(-(y - p_i)^2 / (2 s_i^2))
+    d2u/dy2 = sum_i A_i [ (y-p_i)^2/s_i^4 - 1/s_i^2 ] exp(...)
+ 
+    popt viene en grados (p_i, s_i); el resultado se convierte a [1/(m s)]
+    dividiendo por M^2.
+    """
+    y = np.asarray(y_deg, float)
+    d2 = np.zeros_like(y)
+    for i in range(len(popt) // 3):
+        A, p, s = popt[3 * i: 3 * i + 3]
+        g = np.exp(-((y - p) ** 2) / (2.0 * s ** 2))
+        d2 += A * (((y - p) ** 2) / s ** 4 - 1.0 / s ** 2) * g
+    return d2 / (M ** 2)
+ 
+ 
+def d2u_numeric(lat, ub, M, window=None, poly=3):
+    """
+    Segunda derivada numérica de un perfil observado, con suavizado opcional.
+ 
+    window: ancho impar de la ventana Savitzky-Golay en puntos de grilla.
+            None = sin suavizar (NO recomendado para interpretar cruces).
+    """
+    y_m = np.asarray(lat, float) * M
+    u   = np.asarray(ub, float)
+    if window:
+        if window % 2 == 0:
+            window += 1
+        u = savgol_filter(u, window, poly)
+    return np.gradient(np.gradient(u, y_m), y_m), u
+ 
+ 
+def find_sign_changes(lat, q):
+    """Latitudes donde q cruza cero, por interpolación lineal."""
+    out = []
+    for i in range(len(q) - 1):
+        if q[i] * q[i + 1] < 0.0:
+            f = abs(q[i]) / (abs(q[i]) + abs(q[i + 1]))
+            out.append(lat[i] + f * (lat[i + 1] - lat[i]))
+    return out
+ 
+ 
+def report_rayleigh(lat, ub, fit, M, LAT0, beta_const=None,
+                    smooth_window=13, path="cllj_rayleigh.png"):
+    """
+    Compara q_y = beta - d2u/dy2 entre ERA5 (suavizado) y el ajuste (analítico).
+ 
+    beta_const: si se pasa un valor (p.ej. el BETA del modelo), se calcula
+                también con beta constante, que es lo que la simulación
+                realmente ve en el plano beta.
+    """
+    y_deg = lat - LAT0
+    popt  = fit["popt"]
+ 
+    # --- ERA5: numérico con suavizado (y sin suavizar, solo como referencia) ---
+    d2_raw,  _        = d2u_numeric(lat, ub, M, window=None)
+    d2_smooth, u_sm   = d2u_numeric(lat, ub, M, window=smooth_window)
+ 
+    # --- Ajuste: analítico ---
+    d2_fit = d2u_analytic(y_deg, popt, M)
+ 
+    b_loc = beta_local(lat)
+    q_era_raw    = b_loc - d2_raw
+    q_era_smooth = b_loc - d2_smooth
+    q_fit        = b_loc - d2_fit
+ 
+    sc_era = find_sign_changes(lat, q_era_smooth)
+    sc_fit = find_sign_changes(lat, q_fit)
+ 
+    print("\n" + "=" * 72)
+    print("CRITERIO DE RAYLEIGH   q_y = beta - d2u/dy2")
+    print("=" * 72)
+    print(f"beta local: {b_loc.min():.4e} ({lat.max():.0f}N) "
+          f"a {b_loc.max():.4e} ({lat.min():.0f}N)")
+    if beta_const is not None:
+        print(f"beta del modelo (constante): {beta_const:.4e}"
+              f"   [{(beta_const/np.mean(b_loc)-1)*100:+.1f}% vs media local]")
+ 
+    print(f"\nCruces por cero:")
+    print(f"  ERA5 (savgol w={smooth_window}) : "
+          f"{[f'{s:.2f}N' for s in sc_era] if sc_era else 'ninguno'}")
+    print(f"  Ajuste {fit['n']}G (analitico)  : "
+          f"{[f'{s:.2f}N' for s in sc_fit] if sc_fit else 'ninguno'}")
+    print(f"  ERA5 SIN suavizar           : {len(find_sign_changes(lat, q_era_raw))}"
+          f" cruces  <- ruido, no interpretar")
+ 
+    if not sc_fit:
+        print("\n  [ALERTA] El ajuste NO cambia de signo: la condicion necesaria")
+        print("           de inestabilidad barotropica NO se cumple. El jet del")
+        print("           modelo seria estable.")
+    else:
+        print(f"\n  El ajuste cumple la condicion necesaria en {len(sc_fit)} punto(s).")
+ 
+    # Comparacion cualitativa entre ERA5 y ajuste
+    if sc_era and sc_fit:
+        print("\n  Comparacion ERA5 vs ajuste (deben coincidir aproximadamente):")
+        for s in sc_fit:
+            near = min(sc_era, key=lambda e: abs(e - s))
+            d = abs(near - s)
+            flag = "ok" if d < 1.0 else "DISCREPA"
+            print(f"    ajuste {s:6.2f}N  <->  ERA5 {near:6.2f}N   "
+                  f"(dif {d:.2f} deg)  {flag}")
+ 
+    if beta_const is not None:
+        q_model = beta_const - d2_fit
+        sc_model = find_sign_changes(lat, q_model)
+        print(f"\n  Con beta constante del modelo: "
+              f"{[f'{s:.2f}N' for s in sc_model] if sc_model else 'ningun cruce'}")
+        print("  (esto es lo que la simulacion realmente ve)")
+ 
+    # ---------------- figura ----------------
+    fig, ax = plt.subplots(1, 3, figsize=(15, 5), sharey=True)
+ 
+    ax[0].plot(ub, lat, "ko", ms=3, alpha=0.5, label="ERA5")
+    ax[0].plot(u_sm, lat, "b-", lw=1.2, label=f"ERA5 savgol w={smooth_window}")
+    from_fit = np.zeros_like(y_deg)
+    for i in range(fit["n"]):
+        A, p, s = popt[3 * i: 3 * i + 3]
+        from_fit += A * np.exp(-((y_deg - p) ** 2) / (2 * s ** 2))
+    ax[0].plot(from_fit, lat, "r-", lw=2, label=f"Ajuste {fit['n']}G")
+    ax[0].axvline(0, color="gray", ls=":", lw=1)
+    ax[0].set_xlabel(r"$\bar{u}$ [m/s]"); ax[0].set_ylabel("Latitud [N]")
+    ax[0].set_title("Perfil"); ax[0].legend(fontsize=8); ax[0].grid(alpha=0.3)
+ 
+    ax[1].plot(d2_smooth, lat, "b-", lw=1.2, label="ERA5 (suavizado)")
+    ax[1].plot(d2_fit, lat, "r-", lw=2, label="Ajuste (analitico)")
+    ax[1].axvline(0, color="gray", ls=":", lw=1)
+    ax[1].set_xlabel(r"$\partial^2\bar{u}/\partial y^2$ [m$^{-1}$s$^{-1}$]")
+    ax[1].set_title("Curvatura"); ax[1].legend(fontsize=8); ax[1].grid(alpha=0.3)
+ 
+    ax[2].plot(q_era_smooth, lat, "b-", lw=1.2, label="ERA5 (suavizado)")
+    ax[2].plot(q_fit, lat, "r-", lw=2, label="Ajuste")
+    if beta_const is not None:
+        ax[2].plot(beta_const - d2_fit, lat, "g--", lw=1.5,
+                   label=r"Ajuste, $\beta$ const.")
+    ax[2].axvline(0, color="k", lw=1.2)
+    for s in sc_fit:
+        ax[2].plot(0, s, "r*", ms=12)
+    ax[2].set_xlabel(r"$\beta - \partial^2\bar{u}/\partial y^2$")
+    ax[2].set_title("Criterio de Rayleigh\n(estrellas = cruces del ajuste)")
+    ax[2].legend(fontsize=8); ax[2].grid(alpha=0.3)
+ 
+    fig.tight_layout()
+    fig.savefig(path, dpi=150)
+    print(f"\n[ok] figura -> {path}")
+ 
+    return dict(q_fit=q_fit, q_era=q_era_smooth,
+                sign_changes_fit=sc_fit, sign_changes_era=sc_era)
+ 
+
 
 
 # ------------------------------------------------------------------
@@ -221,44 +389,23 @@ def report_comparison(fits):
     print("'restringidas' = componentes con |A| > 2*sigma_A (senal > 2-sigma).")
     return best
 
-
 def report_fluidsim(fit):
     n, popt = fit["n"], fit["popt"]
+    LAT_MIN = 5.0     # borde sur del dominio fluidsim (y = 0)
     print("\n" + "-" * 70)
-    print(f"Bloque para Jet_Field()  [modelo seleccionado: {n} gaussiana(s)]")
+    print(f"Bloque JET_PARAMS  [modelo: {n} gaussiana(s)]")
+    print("  Convencion: latitud REAL en grados; Jet_Field resta LAT_MIN y")
+    print("  multiplica por m. No multiplicar aqui.")
     print("-" * 70)
-    print("    for lat, amp, sigma in [")
+    print("JET_PARAMS = [")
     order = sorted(range(n), key=lambda i: -abs(popt[3 * i]))
     for i in order:
         A, p, s = popt[3 * i: 3 * i + 3]
-        print(f"        ({p:>7.3f}*m, {A:>8.3f}, {s:>6.3f}*m),"
-              f"   # lat real {p + LAT0:.2f}N")
-    print("    ]:")
-    print("        u_bar += amp * np.exp(-((lats - lat)**2 / (2*sigma**2)))")
-
-    # Diagnosticos fisicos del nucleo (componente de mayor |A|)
-    i0 = max(range(n), key=lambda i: abs(popt[3 * i]))
-    A, p, s    = popt[3 * i0: 3 * i0 + 3]
-    dA, dp, ds = fit["perr"][3 * i0: 3 * i0 + 3]
-    fwhm  = 2.0 * np.sqrt(2.0 * np.log(2.0)) * s
-    dfwhm = 2.0 * np.sqrt(2.0 * np.log(2.0)) * ds
-
-    print("\n" + "-" * 70)
-    print("Nucleo del CLLJ (componente dominante):")
-    print("-" * 70)
-    print(f"  Latitud       : {p + LAT0:.2f} +- {dp:.2f} N   (y = {p:+.2f} deg)")
-    print(f"  Intensidad    : {A:.2f} +- {dA:.2f} m/s")
-    print(f"  sigma         : {s:.2f} +- {ds:.2f} deg")
-    print(f"  FWHM (2.355s) : {fwhm:.2f} +- {dfwhm:.2f} deg")
-
-    off = abs(p)
-    if off > 1.0:
-        print(f"\n  [aviso] el nucleo cae {off:.2f} deg fuera del centro de la")
-        print(f"          grilla (y=0 <-> {LAT0:.0f}N). Considerar recentrar el")
-        print(f"          dominio en {p + LAT0:.1f}N, o verificar estabilidad")
-        print(f"          numerica con el jet descentrado.")
-
-
+        lat_real = p + LAT0
+        y_code   = lat_real - LAT_MIN
+        print(f"    ({lat_real:>7.3f}, {A:>8.3f}, {s:>6.3f}),"
+              f"   # lat real {lat_real:.2f}N -> y_code {y_code:.2f} deg")
+    print("]")
 # ------------------------------------------------------------------
 # 5. Figura
 # ------------------------------------------------------------------
@@ -332,4 +479,7 @@ if __name__ == "__main__":
 
     best = report_comparison(fits)
     report_fluidsim(best)
+    report_rayleigh(lat, ub, best, M, LAT0, beta_const=2.29e-11) 
     plot_fits(lat, ub, fits, best)
+
+
