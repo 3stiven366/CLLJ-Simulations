@@ -1,3 +1,10 @@
+(fluidsim) Estiven@Fedora-Estiven:~/Documentos/Laboratorio/Inestabilidad_Barotropica/era5$ python data.py 
+2026-09-30 11:42:24,925 INFO Request ID is e1b55805-922a-4ebd-bc8f-998a521cbf32
+2026-09-30 11:42:25,121 INFO status has been updated to accepted
+2026-09-30 11:42:47,453 INFO status has been updated to running
+2026-09-30 11:42:59,051 INFO status has been updated to successful
+[ok] descargado -> era5_cllj_925.nc                                                                                                                                                         
+
 ======================================================================
 COMPARACION DE MODELOS  |  CLLJ 925 hPa  |  JAS  |  100W-60W
 ======================================================================
@@ -29,25 +36,41 @@ dAICc > 10 -> el modelo peor queda descartado.
 'restringidas' = componentes con |A| > 2*sigma_A (senal > 2-sigma).
 
 ----------------------------------------------------------------------
-Bloque para Jet_Field()  [modelo seleccionado: 3 gaussiana(s)]
+Bloque JET_PARAMS  [modelo: 3 gaussiana(s)]
+  Convencion: latitud REAL en grados; Jet_Field resta LAT_MIN y
+  multiplica por m. No multiplicar aqui.
 ----------------------------------------------------------------------
-    for lat, amp, sigma in [
-        ( -2.840*m,   -6.112,  1.380*m),   # lat real 12.16N
-        (  6.593*m,   -5.523,  3.480*m),   # lat real 21.59N
-        (  0.733*m,   -4.974,  1.940*m),   # lat real 15.73N
-    ]:
-        u_bar += amp * np.exp(-((lats - lat)**2 / (2*sigma**2)))
+JET_PARAMS = [
+    ( 12.160,   -6.112,  1.380),   # lat real 12.16N -> y_code 7.16 deg
+    ( 21.593,   -5.523,  3.480),   # lat real 21.59N -> y_code 16.59 deg
+    ( 15.733,   -4.974,  1.940),   # lat real 15.73N -> y_code 10.73 deg
+]
 
-----------------------------------------------------------------------
-Nucleo del CLLJ (componente dominante):
-----------------------------------------------------------------------
-  Latitud       : 12.16 +- 0.29 N   (y = -2.84 deg)
-  Intensidad    : -6.11 +- 1.36 m/s
-  sigma         : 1.38 +- 0.16 deg
-  FWHM (2.355s) : 3.25 +- 0.37 deg
+========================================================================
+CRITERIO DE RAYLEIGH   q_y = beta - d2u/dy2
+========================================================================
+beta local: 2.0747e-11 (25N) a 2.2804e-11 (5N)
+beta del modelo (constante): 2.2900e-11   [+4.1% vs media local]
 
-  [aviso] el nucleo cae 2.84 deg fuera del centro de la
-          grilla (y=0 <-> 15N). Considerar recentrar el
-          dominio en 12.2N, o verificar estabilidad
-          numerica con el jet descentrado.
+Cruces por cero:
+  ERA5 (savgol w=13) : ['10.93N', '13.09N', '16.43N', '17.74N', '19.92N', '22.15N']
+  Ajuste 3G (analitico)  : ['11.00N', '13.30N', '15.52N', '17.17N', '21.16N', '23.56N']
+  ERA5 SIN suavizar           : 14 cruces  <- ruido, no interpretar
+
+  El ajuste cumple la condicion necesaria en 6 punto(s).
+
+  Comparacion ERA5 vs ajuste (deben coincidir aproximadamente):
+    ajuste  11.00N  <->  ERA5  10.93N   (dif 0.07 deg)  ok
+    ajuste  13.30N  <->  ERA5  13.09N   (dif 0.21 deg)  ok
+    ajuste  15.52N  <->  ERA5  16.43N   (dif 0.91 deg)  ok
+    ajuste  17.17N  <->  ERA5  17.74N   (dif 0.56 deg)  ok
+    ajuste  21.16N  <->  ERA5  22.15N   (dif 0.99 deg)  ok
+    ajuste  23.56N  <->  ERA5  22.15N   (dif 1.41 deg)  DISCREPA
+
+  Con beta constante del modelo: ['11.00N', '13.29N', '15.53N', '17.16N', '21.24N', '23.40N']
+  (esto es lo que la simulacion realmente ve)
+
+[ok] figura -> cllj_rayleigh.png
+
+[ok] figura -> cllj_fit.png
 

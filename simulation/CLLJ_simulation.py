@@ -2,6 +2,7 @@ from fluidsim.solvers.ns2d.solver import Simul
 from fluiddyn.util.mpi import rank, comm, nb_proc  
 import numpy as np
 import os
+import json   
 import csv
 import time 
 
@@ -21,13 +22,13 @@ np.random.seed(42)
 PHI_REF = 15.0
 M_LAT = 111e3
 M_LON = 111e3 * np.cos(np.radians(PHI_REF))
-days: int = 2                          # Days of simulation
+days: int = 12                          # Days of simulation
 period: int = 86400 * days              # [s]
 
 Lx_deg: int = 40  #140                     # [°]  zonal domain (140°W - 20°W)
 Ly_deg: int = 20                        # [°] southern domain (25°N - 5°N )
-Nx: int    = 256 #4096                        # Zonal points   
-Ny: int    = 128 #512                        # Southern points 
+Nx: int    = 32#256 #4096                        # Zonal points   
+Ny: int    = 168 #512                        # Southern points 
 
 TAU_RELAX: float = 7 * 86400.0          # [s] escala de relajación del jet (~7 días)
 BETA: float = 2.29e-11                  # [s⁻¹ m⁻¹] Rossby parameter
@@ -283,7 +284,7 @@ def easterly_wave_event(lats, lons, t, ev):
         - sigma_x**2 * sigma_y**4
         - sigma_x**4 * sigma_y**2)
 
-    rot = (-curvature * Psi
+    rot = -1*(-curvature * Psi
            - 2 * C * G * sigma_x**2 * sigma_y**4 * k * delta_x * np.cos(theta)
            ) / (sigma_x**4 * sigma_y**4)
 
@@ -479,6 +480,47 @@ def split_kinetic_energy():
     ke_edd = 0.5 * global_mean((ux - ux_bar)**2 + (uy - uy_bar)**2)
     return ke_zon, ke_edd
 
+def write_run_path(path_run):
+    """Vuelca el directorio de salida de esta corrida a un archivo, para que
+    el análisis lo lea después sin adivinar el nombre con fecha/hora. Solo rank 0.
+    La ruta del archivo se puede fijar con la variable de entorno RUN_PATH_FILE
+    (útil para darle un nombre único por job en SLURM)."""
+    if rank != 0:
+        return
+    out_file = os.environ.get("RUN_PATH_FILE", "last_run_path.txt")
+    abs_path = os.path.abspath(path_run)
+    with open(out_file, "w") as f:
+        f.write(abs_path + "\n")
+    print(f"[rank 0] Directorio de la corrida escrito en {os.path.abspath(out_file)}: {abs_path}")
+
+
+def write_config(path_run):
+    """Vuelca las constantes propias del experimento (las que FluidSim NO
+    registra) a un JSON dentro del directorio de la corrida. Solo rank 0."""
+    if rank != 0:
+        return
+    cfg = {
+        "ACTIVE_WAVES": ACTIVE_WAVES,
+        "ACTIVE_JET_NUDGING": ACTIVE_JET_NUDGING,
+        "JET_PARAMS": JET_PARAMS,
+        "TAU_RELAX": TAU_RELAX,
+        "TAU_SPINDOWN": TAU_SPINDOWN,
+        "C_REPRESENTATIVE": C_REPRESENTATIVE,
+        "NU_2": NU_2,
+        "NU_4": NU_4,
+        "NOISE_SIGMA": NOISE_SIGMA,
+        "TAPER_DEG": TAPER_DEG,
+        "LAT_MIN": LAT_MIN,
+        "PHI_REF": PHI_REF,
+        "EVENT_SPACING_DAYS": EVENT_SPACING_DAYS,
+        "T_INJECT_DAYS": T_INJECT_DAYS,
+        "T_RAMP_DAYS": T_RAMP_DAYS,
+        "WAVE_RANGES": WAVE_RANGES,
+    }
+    out = os.path.join(path_run, "config_experimento.json")
+    with open(out, "w") as f:
+        json.dump(cfg, f, indent=2)
+    print(f"[rank 0] Config escrita en {out}")
 # ─────────────────────────────────────────────────────────────────────────
 # SECTION 6 — TIME-DEPENDENT FORCING
 #
@@ -561,6 +603,9 @@ if rank == 0:
 
 write_wave_catalog(sim.output.path_run)
 init_diagnostics(sim.output.path_run)
+write_run_path(sim.output.path_run)
+write_config(sim.output.path_run)
+
 
 sim.time_stepping.start()
 
